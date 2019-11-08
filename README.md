@@ -1,6 +1,10 @@
 # gym-carla
 A Gym wrapper for CARLA simulator
 
+## System Requirements
+- Linux
+- Python = 3.5
+
 ## Installation
 
 1. Clone this git repo
@@ -24,5 +28,12 @@ $ ./CarlaUE4.sh -windowed
 ```
 You can use ```Alt+F1``` to get back your mouse control.
 
+## Usage
+1. See ```test.py``` in the repo's root folder about how to use the CARLA gym wrapper.
 
-5. Run ```test.py``` in the repo root folder
+2.  We provide a dictionary observation including front view camera (obs['camera']), birdeye view lidar point cloud (obs['lidar']) and birdeye view semantic representation (obs['birdeye']).
+<img src="obs.png" width=75% align="left" />
+
+3. The termination condition is either the ego vehicle collides, runs out of lane, reaches a destination, or reaches the maximum episode timesteps. Users may modify function _terminal in carla_env.py to enable customized termination condition.
+
+4. The reward is a weighted combination of longitudinal speed and penalties for collision, exceeding maximum speed, out of lane, large steering and large lateral accleration.  Users may modify function _get_reward in carla_env.py to enable customized termination condition.

@@ -187,7 +187,7 @@ class CarlaEnv(gym.Env):
 			self.collision_hist.append(intensity)
 			if len(self.collision_hist)>self.collision_hist_l:
 				self.collision_hist.pop(0)
-		self.collision_hist=[]
+		self.collision_hist = []
 
 		# Add lidar sensor
 		self.lidar_sensor = self.world.spawn_actor(self.lidar_bp, self.lidar_trans, attach_to=self.ego)
@@ -213,7 +213,7 @@ class CarlaEnv(gym.Env):
 		self.settings.synchronous_mode = True
 		self.world.apply_settings(self.settings)
 
-		self.routeplanner=RoutePlanner(self.ego, self.max_waypt)
+		self.routeplanner = RoutePlanner(self.ego, self.max_waypt)
 		self.waypoints, _, self.vehicle_front = self.routeplanner.run_step()
 
 		# Set ego information for render
@@ -227,19 +227,19 @@ class CarlaEnv(gym.Env):
 			acc = self.discrete_act[0][action//self.n_steer]
 			steer = self.discrete_act[1][action%self.n_steer]
 		else:
-			acc=action[0]
-			steer=action[1]
+			acc = action[0]
+			steer = action[1]
 
 		# Convert acceleration to throttle and brake
-		if acc>0:
-			throttle=np.clip(acc/3,0,1)
-			brake=0
+		if acc > 0:
+			throttle = np.clip(acc/3,0,1)
+			brake = 0
 		else:
-			throttle=0
-			brake=np.clip(-acc/8,0,1)
+			throttle = 0
+			brake = np.clip(-acc/8,0,1)
 
 		# Apply control
-		act=carla.VehicleControl(throttle=float(throttle), steer=float(steer), brake=float(brake))
+		act = carla.VehicleControl(throttle=float(throttle), steer=float(steer), brake=float(brake))
 		self.ego.apply_control(act)
 
 		self.world.tick()
@@ -247,25 +247,25 @@ class CarlaEnv(gym.Env):
 		# Append actors polygon list
 		vehicle_poly_dict = self._get_actor_polygons('vehicle.*')
 		self.vehicle_polygons.append(vehicle_poly_dict)
-		while len(self.vehicle_polygons)>self.max_past_step:
+		while len(self.vehicle_polygons) > self.max_past_step:
 			self.vehicle_polygons.pop(0)
 		walker_poly_dict = self._get_actor_polygons('walker.*')
 		self.walker_polygons.append(walker_poly_dict)
-		while len(self.walker_polygons)>self.max_past_step:
+		while len(self.walker_polygons) > self.max_past_step:
 			self.walker_polygons.pop(0)
 
 		# route planner
 		self.waypoints, _, self.vehicle_front = self.routeplanner.run_step()
 
 		# state information
-		info={
+		info = {
 			'waypoints': self.waypoints,
 			'vehicle_front': self.vehicle_front
 		}
 		
 		# Update timesteps
-		self.time_step+=1
-		self.total_step+=1
+		self.time_step += 1
+		self.total_step += 1
 
 		return (self._get_obs(), self._get_reward(), self._terminal(), copy.deepcopy(info))
 
@@ -452,7 +452,7 @@ class CarlaEnv(gym.Env):
 		# and z is set to be two bins.
 		y_bins = np.arange(-(self.obs_range - self.d_behind), self.d_behind+self.lidar_bin, self.lidar_bin)
 		x_bins = np.arange(-self.obs_range/2, self.obs_range/2+self.lidar_bin, self.lidar_bin)
-		z_bins = [-self.lidar_height-1, -self.lidar_height+0.35, 1]
+		z_bins = [-self.lidar_height-1, -self.lidar_height+0.25, 1]
 		# Get lidar image according to the bins
 		lidar, _ = np.histogramdd(point_cloud, bins=(x_bins, y_bins, z_bins))
 		lidar[:,:,0] = np.array(lidar[:,:,0]>0, dtype=np.uint8)

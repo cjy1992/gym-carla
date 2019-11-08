@@ -9,6 +9,10 @@ import gym
 import gym_carla
 import carla
 
+import scipy
+import os
+import numpy as np
+
 def main():
 	# parameters for the gym_carla environment
 	params = {
@@ -25,7 +29,7 @@ def main():
 		'ego_vehicle_filter': 'vehicle.lincoln*',  # filter for defining ego vehicle
 		'port': 2000,  # connection port
 		'town': 'Town03',  # which town to simulate
-		'task_mode': 'random',  # mode of the task, [random, roundabout (only for Town03)]
+		'task_mode': 'roundabout',  # mode of the task, [random, roundabout (only for Town03)]
 		'max_time_episode': 1000,  # maximum timesteps per episode
 		'max_waypt': 12,  # maximum number of waypoints
 		'obs_range': 32,  # observation range (meter)
@@ -39,9 +43,20 @@ def main():
 	env = gym.make('carla-v0', params=params)
 	obs = env.reset()
 
+	img_dir = '/media/jianyu/DATA/Codes/imgs'
+	if not os.path.exists(img_dir):
+		os.makedirs(img_dir)
+
+	i=0
+
 	while True:
 		action = [1.0, 0.0]
 		obs,r,done,info = env.step(action)
+
+		img = np.concatenate((obs['camera'],obs['lidar'],obs['birdeye']), axis=1)
+		scipy.misc.imsave(os.path.join(img_dir, str(i) + '.png'), img)
+
+		i=i+1
 
 		if done:
 			obs = env.reset()
