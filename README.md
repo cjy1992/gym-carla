@@ -32,7 +32,9 @@ You can use ```Alt+F1``` to get back your mouse control.
 1. See ```test.py``` in the repo's root folder about how to use the CARLA gym wrapper.
 
 2.  We provide a dictionary observation including front view camera (obs['camera']), birdeye view lidar point cloud (obs['lidar']) and birdeye view semantic representation (obs['birdeye']).
-<img src="obs.png" width=75% align="left" />
+<div align="center">
+  <img src="obs.png" width=75%>
+</div>
 
 3. The termination condition is either the ego vehicle collides, runs out of lane, reaches a destination, or reaches the maximum episode timesteps. Users may modify function _terminal in carla_env.py to enable customized termination condition.
 
