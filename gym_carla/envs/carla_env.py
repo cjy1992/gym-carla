@@ -11,8 +11,8 @@ import copy
 import numpy as np
 import pygame
 import random
-import scipy.misc
 from collections import deque
+from skimage.transform import resize
 
 import gym
 from gym import spaces
@@ -439,7 +439,8 @@ class CarlaEnv(gym.Env):
 		birdeye = pygame.surfarray.array3d(self.display)
 		birdeye = birdeye[0:self.display_size, :, :]
 		birdeye = np.fliplr(np.rot90(birdeye, 3))  # flip to regular view
-		birdeye = scipy.misc.imresize(birdeye, (self.obs_size, self.obs_size, 3))  # resize
+		birdeye = resize(birdeye, (self.obs_size, self.obs_size))  # resize
+		birdeye = birdeye * 255
 		birdeye.astype(np.uint8)
 
 		## Lidar image generation
@@ -469,7 +470,7 @@ class CarlaEnv(gym.Env):
 		lidar = lidar * 255
 		# Display lidar image
 		lidar_surface = pygame.Surface((self.display_size, self.display_size)).convert()
-		lidar_display = scipy.misc.imresize(lidar, (self.display_size, self.display_size, 3))
+		lidar_display = resize(lidar, (self.display_size, self.display_size))
 		lidar_display = np.flip(lidar_display, axis=1)
 		lidar_display = np.rot90(lidar_display, 1)
 		pygame.surfarray.blit_array(lidar_surface, lidar_display)
@@ -477,16 +478,18 @@ class CarlaEnv(gym.Env):
 
 		# Display camera image
 		camera_surface = pygame.Surface((self.display_size, self.display_size)).convert()
-		camera_display = scipy.misc.imresize(self.camera_img, (self.display_size, self.display_size, 3))
+		camera_display = resize(self.camera_img, (self.display_size, self.display_size))
 		camera_display = np.flip(camera_display, axis=1)
 		camera_display = np.rot90(camera_display, 1)
+		camera_display = camera_display * 255
 		pygame.surfarray.blit_array(camera_surface, camera_display)
 		self.display.blit(camera_surface, (self.display_size * 2, 0))
 
 		camera = pygame.surfarray.array3d(self.display)
 		camera = camera[2*self.display_size:, :, :]
 		camera = np.fliplr(np.rot90(camera, 3))  # flip to regular view
-		camera = scipy.misc.imresize(camera, (self.obs_size, self.obs_size, 3))  # resize
+		camera = resize(camera, (self.obs_size, self.obs_size))  # resize
+		camera = camera * 255
 		camera.astype(np.uint8)
 
 		# Display on pygame
