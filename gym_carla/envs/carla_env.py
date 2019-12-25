@@ -459,7 +459,7 @@ class CarlaEnv(gym.Env):
 		lidar[:,:,0] = np.array(lidar[:,:,0]>0, dtype=np.uint8)
 		lidar[:,:,1] = np.array(lidar[:,:,1]>0, dtype=np.uint8)
 		# Add the waypoints to lidar image
-		wayptimg = (birdeye[:,:,0] == 0) * (birdeye[:,:,1] == 0) * (birdeye[:,:,2] == 255)
+		wayptimg = (birdeye[:,:,0] <= 10) * (birdeye[:,:,1] <= 10) * (birdeye[:,:,2] >= 240)
 		wayptimg = np.expand_dims(wayptimg, axis=2)
 		wayptimg = np.fliplr(np.rot90(wayptimg, 3))
 		wayptimg.astype(np.uint8)
