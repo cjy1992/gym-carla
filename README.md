@@ -28,6 +28,11 @@ $ ./CarlaUE4.sh -windowed
 ```
 You can use ```Alt+F1``` to get back your mouse control.
 
+Or you can run in non-display mode by:
+```
+$ DISPLAY= ./CarlaUE4.sh -opengl -carla-port=2000
+```
+
 ## Usage
 1. See ```test.py``` in the repo's root folder about how to use the CARLA gym wrapper.
 
