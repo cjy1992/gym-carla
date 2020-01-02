@@ -152,7 +152,7 @@ class CarlaEnv(gym.Env):
 			if self.task_mode == 'random':
 				transform = random.choice(self.vehicle_spawn_points)
 			if self.task_mode == 'roundabout':
-				self.start=[52.1+np.random.uniform(-5,5) ,-4.2, 178.66] # random
+				self.start=[52.1+np.random.uniform(-5,5),-4.2, 178.66] # random
 				transform = self._set_carla_transform(self.start)
 			if self._try_spawn_ego_vehicle_at(transform):
 				break
@@ -301,7 +301,7 @@ class CarlaEnv(gym.Env):
 		"""
 		pygame.init()
 		self.display = pygame.display.set_mode(
-		(self.display_size * 3, self.display_size),
+		(self.display_size * 4, self.display_size),
 		pygame.HWSURFACE | pygame.DOUBLEBUF)
 
 		pixels_per_meter = self.display_size / self.obs_range
@@ -492,10 +492,61 @@ class CarlaEnv(gym.Env):
 		camera = camera * 255
 		camera.astype(np.uint8)
 
+		# Vehicle classification and regression maps (requires further normalization)
+		vh_clas = np.zeros((self.obs_size, self.obs_size))
+		vh_regr = np.zeros((self.obs_size, self.obs_size, 6))
+
+		# Filter out vehicles that are far away from ego
+		vehicle_poly_dict = self._get_actor_polygons('vehicle.*')
+		keys_to_remove = []
+		ego_trans = self.ego.get_transform()
+		ego_x = ego_trans.location.x
+		ego_y = ego_trans.location.y
+		ego_yaw = ego_trans.rotation.yaw/180*np.pi
+		for key in vehicle_poly_dict:
+			poly = vehicle_poly_dict[key]
+			for i in range(poly.shape[0]):
+				dx = poly[i, 0] - ego_x
+				dy = poly[i, 1] - ego_y
+				poly[i, 0] = (dy-dx*np.tan(ego_yaw))*np.cos(ego_yaw)
+				poly[i, 1] = dx/np.cos(ego_yaw) + (dy-dx*np.tan(ego_yaw))*np.sin(ego_yaw)
+			if poly[0, 0]**2 + poly[0, 1]**2 > 3 * self.obs_range**2:
+				keys_to_remove.append(key)
+			else:
+				vehicle_poly_dict[key] = poly
+		for key in keys_to_remove:
+			del vehicle_poly_dict[key]
+
+		for i in range(self.obs_size):
+			for j in range(self.obs_size):
+				if abs(birdeye[i, j, 0] - 0)<20 and abs(birdeye[i, j, 1] - 255)<20 and abs(birdeye[i, j, 2] - 0)<20:
+					x = (j - self.obs_size/2) * self.obs_range / self.obs_size
+					y = (self.obs_size - i) * self.obs_range / self.obs_size - self.d_behind
+					vh_clas[i, j] = 1
+					xc = (poly[0, 0] + poly[2, 0]) / 2
+					yc = (poly[0, 1] + poly[2, 1]) / 2
+					dx = xc - x
+					dy = yc - y
+					dr = np.sqrt(dx ** 2 + dy ** 2)
+					cos = 1 if dr == 0 else dy / dr
+					sin = 0 if dr == 0 else dx / dr
+					w = np.sqrt((poly[0, 0] - poly[1, 0]) ** 2 + (poly[0, 1] - poly[1, 1]) ** 2)
+					l = np.sqrt((poly[2, 0] - poly[1, 0]) ** 2 + (poly[2, 1] - poly[1, 1]) ** 2)
+					vh_regr[i, j, :] = np.array([cos, sin, dx, dy, np.log(w), np.log(l)])
+
+		vh_clas_surface = pygame.Surface((self.display_size, self.display_size)).convert()
+		vh_clas_display = np.stack([vh_clas, vh_clas, vh_clas], axis=2)
+		vh_clas_display = resize(vh_clas_display, (self.display_size, self.display_size))
+		vh_clas_display = np.flip(vh_clas_display, axis=1)
+		vh_clas_display = np.rot90(vh_clas_display, 1)
+		vh_clas_display = vh_clas_display * 255
+		pygame.surfarray.blit_array(vh_clas_surface, vh_clas_display)
+		self.display.blit(vh_clas_surface, (self.display_size * 3, 0))
+
 		# Display on pygame
 		pygame.display.flip()
 
-		obs = {'birdeye': birdeye, 'lidar': lidar, 'camera': camera}
+		obs = {'birdeye': birdeye, 'lidar': lidar, 'camera': camera, 'vh_clas': vh_clas, 'vh_reg_map': vh_regr}
 		
 		return obs
 
