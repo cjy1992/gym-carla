@@ -493,9 +493,10 @@ class CarlaEnv(gym.Env):
 		camera.astype(np.uint8)
 
 		# Vehicle classification and regression maps (requires further normalization)
-		vh_clas = np.zeros((self.display_size, self.display_size))
-		vh_regr = np.zeros((self.display_size, self.display_size, 6))
+		vh_clas = np.zeros((self.obs_size, self.obs_size))
+		vh_regr = np.zeros((self.obs_size, self.obs_size, 6))
 
+		# Filter out vehicles that are far away from ego
 		vehicle_poly_dict = self._get_actor_polygons('vehicle.*')
 		keys_to_remove = []
 		ego_trans = self.ego.get_transform()
@@ -516,11 +517,11 @@ class CarlaEnv(gym.Env):
 		for key in keys_to_remove:
 			del vehicle_poly_dict[key]
 
-		for i in range(self.display_size):
-			for j in range(self.display_size):
-				if birdeye[i, j, 1] == 255:
-					x = (j - self.display_size/2) * self.obs_range / self.display_size
-					y = (self.display_size - i) * self.obs_range / self.display_size - self.d_behind
+		for i in range(self.obs_size):
+			for j in range(self.obs_size):
+				if abs(birdeye[i, j, 0] - 0)<20 and abs(birdeye[i, j, 1] - 255)<20 and abs(birdeye[i, j, 2] - 0)<20:
+					x = (j - self.obs_size/2) * self.obs_range / self.obs_size
+					y = (self.obs_size - i) * self.obs_range / self.obs_size - self.d_behind
 					vh_clas[i, j] = 1
 					xc = (poly[0, 0] + poly[2, 0]) / 2
 					yc = (poly[0, 1] + poly[2, 1]) / 2
@@ -535,6 +536,7 @@ class CarlaEnv(gym.Env):
 
 		vh_clas_surface = pygame.Surface((self.display_size, self.display_size)).convert()
 		vh_clas_display = np.stack([vh_clas, vh_clas, vh_clas], axis=2)
+		vh_clas_display = resize(vh_clas_display, (self.display_size, self.display_size))
 		vh_clas_display = np.flip(vh_clas_display, axis=1)
 		vh_clas_display = np.rot90(vh_clas_display, 1)
 		vh_clas_display = vh_clas_display * 255
