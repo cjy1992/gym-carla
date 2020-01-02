@@ -518,23 +518,20 @@ class CarlaEnv(gym.Env):
 
 		for i in range(self.display_size):
 			for j in range(self.display_size):
-				x = (j - self.display_size/2) * self.obs_range / self.display_size
-				y = (self.display_size - i) * self.obs_range / self.display_size - self.d_behind
-				for key in vehicle_poly_dict:
-					poly = vehicle_poly_dict[key]
-					if self._is_pt_in_rectangle(x, y, poly):
-						vh_clas[i, j] = 1
-						xc = (poly[0, 0] + poly[2, 0]) / 2
-						yc = (poly[0, 1] + poly[2, 1]) / 2
-						dx = xc - x
-						dy = yc - y
-						dr = np.sqrt(dx**2 + dy**2)
-						cos = 1 if dr == 0 else dy/dr
-						sin = 0 if dr == 0 else dx/dr
-						w = np.sqrt((poly[0, 0] - poly[1, 0])**2 + (poly[0, 1] - poly[1, 1])**2)
-						l = np.sqrt((poly[2, 0] - poly[1, 0])**2 + (poly[2, 1] - poly[1, 1])**2)
-						vh_regr[i, j, :] = np.array([cos, sin, dx, dy, np.log(w), np.log(l)])
-						break
+				if birdeye[i, j, 1] == 255:
+					x = (j - self.display_size/2) * self.obs_range / self.display_size
+					y = (self.display_size - i) * self.obs_range / self.display_size - self.d_behind
+					vh_clas[i, j] = 1
+					xc = (poly[0, 0] + poly[2, 0]) / 2
+					yc = (poly[0, 1] + poly[2, 1]) / 2
+					dx = xc - x
+					dy = yc - y
+					dr = np.sqrt(dx ** 2 + dy ** 2)
+					cos = 1 if dr == 0 else dy / dr
+					sin = 0 if dr == 0 else dx / dr
+					w = np.sqrt((poly[0, 0] - poly[1, 0]) ** 2 + (poly[0, 1] - poly[1, 1]) ** 2)
+					l = np.sqrt((poly[2, 0] - poly[1, 0]) ** 2 + (poly[2, 1] - poly[1, 1]) ** 2)
+					vh_regr[i, j, :] = np.array([cos, sin, dx, dy, np.log(w), np.log(l)])
 
 		vh_clas_surface = pygame.Surface((self.display_size, self.display_size)).convert()
 		vh_clas_display = np.stack([vh_clas, vh_clas, vh_clas], axis=2)
@@ -550,20 +547,6 @@ class CarlaEnv(gym.Env):
 		obs = {'birdeye': birdeye, 'lidar': lidar, 'camera': camera, 'vh_clas': vh_clas, 'vh_reg_map': vh_regr}
 		
 		return obs
-
-	def _is_pt_in_rectangle(self, x, y, poly):
-		"""return true if pt (x, y) is inside rectangle poly (area of rectangle equals summation of four triangles)"""
-		a1 = abs(x * (poly[0, 1] - poly[1, 1]) + poly[0, 0] * (poly[1, 1] - y) + poly[1, 0] * (y - poly[0, 1])) / 2
-		a2 = abs(x * (poly[1, 1] - poly[2, 1]) + poly[1, 0] * (poly[2, 1] - y) + poly[2, 0] * (y - poly[1, 1])) / 2
-		a3 = abs(x * (poly[2, 1] - poly[3, 1]) + poly[2, 0] * (poly[3, 1] - y) + poly[3, 0] * (y - poly[2, 1])) / 2
-		a4 = abs(x * (poly[3, 1] - poly[0, 1]) + poly[3, 0] * (poly[0, 1] - y) + poly[0, 0] * (y - poly[3, 1])) / 2
-		a = abs(poly[2, 0] * (poly[0, 1] - poly[1, 1]) +
-				poly[0, 0] * (poly[1, 1] - poly[2, 1]) +
-				poly[1, 0] * (poly[2, 1] - poly[0, 1])) / 2 + \
-			abs(poly[2, 0] * (poly[0, 1] - poly[3, 1]) +
-				poly[0, 0] * (poly[3, 1] - poly[2, 1]) +
-				poly[3, 0] * (poly[2, 1] - poly[0, 1])) / 2
-		return abs(a1 + a2 + a3 + a4 - a) < 0.1
 
 	def _get_reward(self):
 		"""Calculate the step reward."""
