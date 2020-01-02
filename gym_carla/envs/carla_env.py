@@ -496,12 +496,23 @@ class CarlaEnv(gym.Env):
 		vh_clas = np.zeros((self.display_size, self.display_size))
 		vh_regr = np.zeros((self.display_size, self.display_size, 6))
 
-		vehicle_poly_dict = self.vehicle_polygons[-1]
+		vehicle_poly_dict = self._get_actor_polygons('vehicle.*')
 		keys_to_remove = []
+		ego_trans = self.ego.get_transform()
+		ego_x = ego_trans.location.x
+		ego_y = ego_trans.location.y
+		ego_yaw = ego_trans.rotation.yaw/180*np.pi
 		for key in vehicle_poly_dict:
 			poly = vehicle_poly_dict[key]
+			for i in range(poly.shape[0]):
+				dx = poly[i, 0] - ego_x
+				dy = poly[i, 1] - ego_y
+				poly[i, 0] = (dy-dx*np.tan(ego_yaw))*np.cos(ego_yaw)
+				poly[i, 1] = dx/np.cos(ego_yaw) + (dy-dx*np.tan(ego_yaw))*np.sin(ego_yaw)
 			if poly[0, 0]**2 + poly[0, 1]**2 > 3 * self.obs_range**2:
 				keys_to_remove.append(key)
+			else:
+				vehicle_poly_dict[key] = poly
 		for key in keys_to_remove:
 			del vehicle_poly_dict[key]
 
@@ -546,8 +557,12 @@ class CarlaEnv(gym.Env):
 		a2 = abs(x * (poly[1, 1] - poly[2, 1]) + poly[1, 0] * (poly[2, 1] - y) + poly[2, 0] * (y - poly[1, 1])) / 2
 		a3 = abs(x * (poly[2, 1] - poly[3, 1]) + poly[2, 0] * (poly[3, 1] - y) + poly[3, 0] * (y - poly[2, 1])) / 2
 		a4 = abs(x * (poly[3, 1] - poly[0, 1]) + poly[3, 0] * (poly[0, 1] - y) + poly[0, 0] * (y - poly[3, 1])) / 2
-		a = np.sqrt((poly[0, 0] - poly[1, 0])**2 + (poly[0, 1] - poly[1, 1])**2) * \
-			np.sqrt((poly[2, 0] - poly[1, 0])**2 + (poly[2, 1] - poly[1, 1])**2)
+		a = abs(poly[2, 0] * (poly[0, 1] - poly[1, 1]) +
+				poly[0, 0] * (poly[1, 1] - poly[2, 1]) +
+				poly[1, 0] * (poly[2, 1] - poly[0, 1])) / 2 + \
+			abs(poly[2, 0] * (poly[0, 1] - poly[3, 1]) +
+				poly[0, 0] * (poly[3, 1] - poly[2, 1]) +
+				poly[3, 0] * (poly[2, 1] - poly[0, 1])) / 2
 		return abs(a1 + a2 + a3 + a4 - a) < 0.1
 
 	def _get_reward(self):
