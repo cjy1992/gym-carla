@@ -44,6 +44,7 @@ class CarlaEnv(gym.Env):
 		self.out_lane_thres = params['out_lane_thres']
 		self.desired_speed = params['desired_speed']
 		self.max_ego_spawn_times = params['max_ego_spawn_times']
+		self.target_waypt_index = params['target_waypt_index']
 
 		# Destination
 		if params['task_mode'] == 'roundabout':
@@ -565,7 +566,18 @@ class CarlaEnv(gym.Env):
 		# Display on pygame
 		pygame.display.flip()
 
-		obs = {'birdeye': birdeye, 'lidar': lidar, 'camera': camera, 'vh_clas': vh_clas, 'vh_reg_map': vh_regr}
+		## State observation,  [waypt_x, waypt_y, speed_ego], where waypt_x and waypt_y 
+		# is the xy position of target waypoint in ego's local coordinate (right-handed), where
+		# ego vehicle is at the origin and heading to the positive x axis
+		target_waypt = self.waypoints[self.target_waypt_index][0:2]
+		d_target_waypt = target_waypt - np.array([ego_x, ego_y])
+		R = np.array([[np.cos(ego_yaw), np.sin(ego_yaw)],[-np.sin(ego_yaw), np.cos(ego_yaw)]])
+		local_target_waypt = np.matmul(R, np.expand_dims(d_target_waypt, 1))  # [2,1]
+		local_target_waypt = np.squeeze(local_target_waypt)  # [2,]
+		v = self.ego.get_velocity()
+		state = np.array([local_target_waypt[0], -local_target_waypt[1], v]) 
+		obs = {'birdeye': birdeye, 'lidar': lidar, 'camera': camera, 
+			'vh_clas': vh_clas, 'vh_reg_map': vh_regr, 'state': state}
 		
 		return obs
 

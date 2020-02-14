@@ -35,6 +35,7 @@ def main():
 		'out_lane_thres': 2.0,  # threshold for out of lane
 		'desired_speed': 8,  # desired speed (m/s)
 		'max_ego_spawn_times': 100,  # maximum times to spawn ego vehicle
+		'target_waypt_index': 5,  # index of the target way point
 	}
 
 	# Set gym-carla environment
