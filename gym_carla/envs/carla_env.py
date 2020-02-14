@@ -575,7 +575,9 @@ class CarlaEnv(gym.Env):
 		local_target_waypt = np.matmul(R, np.expand_dims(d_target_waypt, 1))  # [2,1]
 		local_target_waypt = np.squeeze(local_target_waypt)  # [2,]
 		v = self.ego.get_velocity()
-		state = np.array([local_target_waypt[0], -local_target_waypt[1], v]) 
+		speed = np.sqrt(v.x**2 + v.y**2)
+		state = np.array([local_target_waypt[0], -local_target_waypt[1], speed]) 
+
 		obs = {'birdeye': birdeye, 'lidar': lidar, 'camera': camera, 
 			'vh_clas': vh_clas, 'vh_reg_map': vh_regr, 'state': state}
 		
