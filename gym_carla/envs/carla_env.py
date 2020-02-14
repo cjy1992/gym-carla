@@ -11,6 +11,7 @@ import copy
 import numpy as np
 import pygame
 import random
+import time
 from collections import deque
 from skimage.transform import resize
 
@@ -42,6 +43,7 @@ class CarlaEnv(gym.Env):
 		self.obs_size = int(self.obs_range/self.lidar_bin)
 		self.out_lane_thres = params['out_lane_thres']
 		self.desired_speed = params['desired_speed']
+		self.max_ego_spawn_times = params['max_ego_spawn_times']
 
 		# Destination
 		if params['task_mode'] == 'roundabout':
@@ -147,16 +149,6 @@ class CarlaEnv(gym.Env):
 			if self._try_spawn_random_vehicle_at(random.choice(self.vehicle_spawn_points), number_of_wheels=[4]):
 				count -= 1
 
-		# Spawn the ego vehicle
-		while True:
-			if self.task_mode == 'random':
-				transform = random.choice(self.vehicle_spawn_points)
-			if self.task_mode == 'roundabout':
-				self.start=[52.1+np.random.uniform(-5,5),-4.2, 178.66] # random
-				transform = self._set_carla_transform(self.start)
-			if self._try_spawn_ego_vehicle_at(transform):
-				break
-
 		# Spawn pedestrians
 		random.shuffle(self.walker_spawn_points)
 		count = self.number_of_walkers
@@ -177,6 +169,24 @@ class CarlaEnv(gym.Env):
 		self.walker_polygons = []
 		walker_poly_dict = self._get_actor_polygons('walker.*')
 		self.walker_polygons.append(walker_poly_dict)
+
+		# Spawn the ego vehicle
+		ego_spawn_times = 0
+		while True:
+			if ego_spawn_times > self.max_ego_spawn_times:
+				self.reset()
+
+			if self.task_mode == 'random':
+				transform = random.choice(self.vehicle_spawn_points)
+			if self.task_mode == 'roundabout':
+				# self.start=[52.1+np.random.uniform(-5,5),-4.2, 178.66] # random
+				self.start=[52.1,-4.2, 178.66] # static
+				transform = self._set_carla_transform(self.start)
+			if self._try_spawn_ego_vehicle_at(transform):
+				break
+			else:
+				ego_spawn_times += 1
+				time.sleep(0.1)
 
 		# Add collision sensor
 		self.collision_sensor = self.world.spawn_actor(self.collision_bp, carla.Transform(), attach_to=self.ego)
@@ -372,7 +382,16 @@ class CarlaEnv(gym.Env):
 		Returns:
 			Bool indicating whether the spawn is successful.
 		"""
-		vehicle = self.world.try_spawn_actor(self.ego_bp, transform)
+
+		for idx, poly in self.vehicle_polygons[0].items():
+			poly_center = np.mean(poly, axis=0)
+			ego_center = np.array([transform.location.x, transform.location.y])
+			dis = np.linalg.norm(poly_center - ego_center)
+			if dis > 8:
+				vehicle = self.world.try_spawn_actor(self.ego_bp, transform)
+				break
+			else:
+				return False
 		if vehicle is not None:
 			self.ego=vehicle
 			return True
@@ -486,7 +505,7 @@ class CarlaEnv(gym.Env):
 		self.display.blit(camera_surface, (self.display_size * 2, 0))
 
 		camera = pygame.surfarray.array3d(self.display)
-		camera = camera[2*self.display_size:, :, :]
+		camera = camera[2*self.display_size:3*self.display_size, :, :]
 		camera = np.fliplr(np.rot90(camera, 3))  # flip to regular view
 		camera = resize(camera, (self.obs_size, self.obs_size))  # resize
 		camera = camera * 255
