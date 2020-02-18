@@ -65,7 +65,10 @@ class CarlaEnv(gym.Env):
 			params['continuous_steer_range'][1]]), dtype=np.float32)  # acc, steer
 		self.observation_space = spaces.Dict({'birdeye': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
 			'lidar': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
-			'camera': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8)})
+			'camera': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
+			'roadmap': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
+			'vh_clas': spaces.Box(low=0, high=1, shape=(self.obs_size, self.obs_size), dtype=np.uint8),
+			'vh_regr': spaces.Box(low=-np.inf, high=np.inf, shape=(self.obs_size, self.obs_size, 6), dtype=np.float32)})
 
 		# Connect to carla server and get world object
 		print('connecting to Carla server...')
@@ -312,7 +315,7 @@ class CarlaEnv(gym.Env):
 		"""
 		pygame.init()
 		self.display = pygame.display.set_mode(
-		(self.display_size * 4, self.display_size),
+		(self.display_size * 5, self.display_size),
 		pygame.HWSURFACE | pygame.DOUBLEBUF)
 
 		pixels_per_meter = self.display_size / self.obs_range
@@ -447,6 +450,24 @@ class CarlaEnv(gym.Env):
 		"""
 		return self.ego
 
+	def _display_to_rgb(self, display):
+		""" Transform image grabbed from pygame display to an rgb image uint8 matrix
+		"""
+		rgb = np.fliplr(np.rot90(display, 3))  # flip to regular view
+		rgb = resize(rgb, (self.obs_size, self.obs_size))  # resize
+		rgb = rgb * 255
+		return rgb
+
+	def _rgb_to_display_surface(self, rgb):
+		""" Generate pygame surface given an rgb image uint8 matrix
+		"""
+		surface = pygame.Surface((self.display_size, self.display_size)).convert()
+		display = resize(rgb, (self.display_size, self.display_size))
+		display = np.flip(display, axis=1)
+		display = np.rot90(display, 1)
+		pygame.surfarray.blit_array(surface, display)
+		return surface
+
 	def _get_obs(self):
 		"""Get the observations."""
 		## Birdeye rendering
@@ -454,14 +475,26 @@ class CarlaEnv(gym.Env):
 		self.birdeye_render.walker_polygons = self.walker_polygons
 		self.birdeye_render.waypoints = self.waypoints
 
-		self.birdeye_render.render(self.display)
-		# pygame.display.flip()
+		# birdeye view with roadmap and actors
+		self.birdeye_render.render(self.display, ['roadmap', 'actors'])
 		birdeye = pygame.surfarray.array3d(self.display)
 		birdeye = birdeye[0:self.display_size, :, :]
-		birdeye = np.fliplr(np.rot90(birdeye, 3))  # flip to regular view
-		birdeye = resize(birdeye, (self.obs_size, self.obs_size))  # resize
-		birdeye = birdeye * 255
-		birdeye.astype(np.uint8)
+		birdeye = self._display_to_rgb(birdeye)
+
+		# Roadmap
+		self.birdeye_render.render(self.display, ['roadmap'])
+		roadmap = pygame.surfarray.array3d(self.display)
+		roadmap = roadmap[0:self.display_size, :, :]
+		roadmap = self._display_to_rgb(roadmap)
+		# Add ego vehicle
+		for i in range(self.obs_size):
+			for j in range(self.obs_size):
+				if abs(birdeye[i, j, 0] - 255)<20 and abs(birdeye[i, j, 1] - 0)<20 and abs(birdeye[i, j, 0] - 255)<20:
+					roadmap[i, j, :] = birdeye[i, j, :]
+
+		# Display birdeye image
+		birdeye_surface = self._rgb_to_display_surface(birdeye)
+		self.display.blit(birdeye_surface, (0, 0))
 
 		## Lidar image generation
 		point_cloud = []
@@ -482,37 +515,26 @@ class CarlaEnv(gym.Env):
 		wayptimg = (birdeye[:,:,0] <= 10) * (birdeye[:,:,1] <= 10) * (birdeye[:,:,2] >= 240)
 		wayptimg = np.expand_dims(wayptimg, axis=2)
 		wayptimg = np.fliplr(np.rot90(wayptimg, 3))
-		wayptimg.astype(np.uint8)
 		# Get the final lidar image
 		lidar = np.concatenate((lidar, wayptimg), axis=2)
 		lidar = np.flip(lidar, axis=1)
 		lidar = np.rot90(lidar, 1)
 		lidar = lidar * 255
+
 		# Display lidar image
-		lidar_surface = pygame.Surface((self.display_size, self.display_size)).convert()
-		lidar_display = resize(lidar, (self.display_size, self.display_size))
-		lidar_display = np.flip(lidar_display, axis=1)
-		lidar_display = np.rot90(lidar_display, 1)
-		pygame.surfarray.blit_array(lidar_surface, lidar_display)
+		lidar_surface = self._rgb_to_display_surface(lidar)
 		self.display.blit(lidar_surface, (self.display_size, 0))
 
-		# Display camera image
-		camera_surface = pygame.Surface((self.display_size, self.display_size)).convert()
-		camera_display = resize(self.camera_img, (self.display_size, self.display_size))
-		camera_display = np.flip(camera_display, axis=1)
-		camera_display = np.rot90(camera_display, 1)
-		camera_display = camera_display * 255
-		pygame.surfarray.blit_array(camera_surface, camera_display)
+		## Display camera image
+		camera = resize(self.camera_img, (self.obs_size, self.obs_size)) * 255
+		camera_surface = self._rgb_to_display_surface(camera)
 		self.display.blit(camera_surface, (self.display_size * 2, 0))
 
-		camera = pygame.surfarray.array3d(self.display)
-		camera = camera[2*self.display_size:3*self.display_size, :, :]
-		camera = np.fliplr(np.rot90(camera, 3))  # flip to regular view
-		camera = resize(camera, (self.obs_size, self.obs_size))  # resize
-		camera = camera * 255
-		camera.astype(np.uint8)
+		## Display roadmap image
+		roadmap_surface = self._rgb_to_display_surface(roadmap)
+		self.display.blit(roadmap_surface, (self.display_size * 3, 0))
 
-		# Vehicle classification and regression maps (requires further normalization)
+		## Vehicle classification and regression maps (requires further normalization)
 		vh_clas = np.zeros((self.obs_size, self.obs_size))
 		vh_regr = np.zeros((self.obs_size, self.obs_size, 6))
 
@@ -539,7 +561,7 @@ class CarlaEnv(gym.Env):
 
 		for i in range(self.obs_size):
 			for j in range(self.obs_size):
-				if abs(birdeye[i, j, 0] - 0)<20 and abs(birdeye[i, j, 1] - 255)<20 and abs(birdeye[i, j, 2] - 0)<20:
+				if abs(birdeye[i, j, 0] - 0)<10 and abs(birdeye[i, j, 1] - 255)<10 and abs(birdeye[i, j, 2] - 0)<10:
 					x = (j - self.obs_size/2) * self.obs_range / self.obs_size
 					y = (self.obs_size - i) * self.obs_range / self.obs_size - self.d_behind
 					vh_clas[i, j] = 1
@@ -554,14 +576,10 @@ class CarlaEnv(gym.Env):
 					l = np.sqrt((poly[2, 0] - poly[1, 0]) ** 2 + (poly[2, 1] - poly[1, 1]) ** 2)
 					vh_regr[i, j, :] = np.array([cos, sin, dx, dy, np.log(w), np.log(l)])
 
-		vh_clas_surface = pygame.Surface((self.display_size, self.display_size)).convert()
 		vh_clas_display = np.stack([vh_clas, vh_clas, vh_clas], axis=2)
-		vh_clas_display = resize(vh_clas_display, (self.display_size, self.display_size))
-		vh_clas_display = np.flip(vh_clas_display, axis=1)
-		vh_clas_display = np.rot90(vh_clas_display, 1)
 		vh_clas_display = vh_clas_display * 255
-		pygame.surfarray.blit_array(vh_clas_surface, vh_clas_display)
-		self.display.blit(vh_clas_surface, (self.display_size * 3, 0))
+		vh_clas_surface = self._rgb_to_display_surface(vh_clas_display)
+		self.display.blit(vh_clas_surface, (self.display_size * 4, 0))
 
 		# Display on pygame
 		pygame.display.flip()
@@ -569,8 +587,8 @@ class CarlaEnv(gym.Env):
 		## State observation,  [waypt_x, waypt_y, speed_ego], where waypt_x and waypt_y 
 		# is the xy position of target waypoint in ego's local coordinate (right-handed), where
 		# ego vehicle is at the origin and heading to the positive x axis
-		target_waypt = self.waypoints[self.target_waypt_index][0:2]
-		d_target_waypt = target_waypt - np.array([ego_x, ego_y])
+		target_waypt = self.waypoints[self.target_waypt_index]
+		d_target_waypt = target_waypt[0:2] - np.array([ego_x, ego_y])
 		R = np.array([[np.cos(ego_yaw), np.sin(ego_yaw)],[-np.sin(ego_yaw), np.cos(ego_yaw)]])
 		local_target_waypt = np.matmul(R, np.expand_dims(d_target_waypt, 1))  # [2,1]
 		local_target_waypt = np.squeeze(local_target_waypt)  # [2,]
@@ -578,8 +596,9 @@ class CarlaEnv(gym.Env):
 		speed = np.sqrt(v.x**2 + v.y**2)
 		state = np.array([local_target_waypt[0], -local_target_waypt[1], speed]) 
 
-		obs = {'birdeye': birdeye, 'lidar': lidar, 'camera': camera, 
-			'vh_clas': vh_clas, 'vh_reg_map': vh_regr, 'state': state}
+		obs = {'birdeye':birdeye.astype(np.uint8), 'lidar':lidar.astype(np.uint8), 'camera':camera.astype(np.uint8),
+			'roadmap':roadmap.astype(np.uint8), 'vh_clas':vh_clas.astype(np.uint8), 'vh_regr':vh_regr.astype(np.float32),
+			'state': state}
 		
 		return obs
 

@@ -514,7 +514,7 @@ class BirdeyeRender(object):
         self.actors_surface.set_clip(clipping_rect)
         self.result_surface.set_clip(clipping_rect)
 
-    def render(self, display):
+    def render(self, display, render_types=None):
         # clock tick
         self.tick(self.server_clock)
 
@@ -533,9 +533,16 @@ class BirdeyeRender(object):
             self.waypoints)
 
         # Blit surfaces
-        surfaces = ((self.map_image.surface, (0, 0)),
-                    (self.actors_surface, (0, 0)),
-                    )
+        if render_types == None:
+            surfaces = [(self.map_image.surface, (0, 0)),
+                        (self.actors_surface, (0, 0)),
+                        ]
+        else:
+            surfaces = []
+            if 'roadmap' in render_types:
+                surfaces.append((self.map_image.surface, (0, 0)))
+            if 'actors' in render_types:
+                surfaces.append((self.actors_surface, (0, 0)))
 
         angle = 0.0 if self.hero_actor is None else self.hero_transform.rotation.yaw + 90.0
 
