@@ -13,7 +13,7 @@ import carla
 def main():
 	# parameters for the gym_carla environment
 	params = {
-		'number_of_vehicles': 150,
+		'number_of_vehicles': 100,
 		'number_of_walkers': 0,
 		'display_size': 256,  # screen size of bird-eye render
 		'max_past_step': 1,  # the number of past steps to draw
@@ -34,8 +34,9 @@ def main():
 		'd_behind': 12,  # distance behind the ego vehicle (meter)
 		'out_lane_thres': 2.0,  # threshold for out of lane
 		'desired_speed': 8,  # desired speed (m/s)
-		'max_ego_spawn_times': 100,  # maximum times to spawn ego vehicle
+		'max_ego_spawn_times': 200,  # maximum times to spawn ego vehicle
 		'target_waypt_index': 5,  # index of the target way point
+		'display_route': False,  # whether to render the desired route
 	}
 
 	# Set gym-carla environment

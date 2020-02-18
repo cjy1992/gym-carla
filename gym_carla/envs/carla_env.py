@@ -45,6 +45,7 @@ class CarlaEnv(gym.Env):
 		self.desired_speed = params['desired_speed']
 		self.max_ego_spawn_times = params['max_ego_spawn_times']
 		self.target_waypt_index = params['target_waypt_index']
+		self.display_route = params['display_route']
 
 		# Destination
 		if params['task_mode'] == 'roundabout':
@@ -379,26 +380,31 @@ class CarlaEnv(gym.Env):
 
 	def _try_spawn_ego_vehicle_at(self, transform):
 		"""Try to spawn the ego vehicle at specific transform.
-
 		Args:
 			transform: the carla transform object.
-
 		Returns:
 			Bool indicating whether the spawn is successful.
 		"""
-
+		vehicle = None
+		# Check if ego position overlaps with surrounding vehicles
+		overlap = False
 		for idx, poly in self.vehicle_polygons[0].items():
 			poly_center = np.mean(poly, axis=0)
 			ego_center = np.array([transform.location.x, transform.location.y])
 			dis = np.linalg.norm(poly_center - ego_center)
 			if dis > 8:
-				vehicle = self.world.try_spawn_actor(self.ego_bp, transform)
-				break
+				continue
 			else:
-				return False
+				overlap = True
+				break
+
+		if not overlap:
+			vehicle = self.world.try_spawn_actor(self.ego_bp, transform)
+
 		if vehicle is not None:
 			self.ego=vehicle
 			return True
+			
 		return False
 
 	def _set_carla_transform(self, pose):
@@ -476,13 +482,19 @@ class CarlaEnv(gym.Env):
 		self.birdeye_render.waypoints = self.waypoints
 
 		# birdeye view with roadmap and actors
-		self.birdeye_render.render(self.display, ['roadmap', 'actors'])
+		birdeye_render_types = ['roadmap', 'actors']
+		if self.display_route:
+			birdeye_render_types.append('waypoints')
+		self.birdeye_render.render(self.display, birdeye_render_types)
 		birdeye = pygame.surfarray.array3d(self.display)
 		birdeye = birdeye[0:self.display_size, :, :]
 		birdeye = self._display_to_rgb(birdeye)
 
 		# Roadmap
-		self.birdeye_render.render(self.display, ['roadmap'])
+		roadmap_render_types = ['roadmap']
+		if self.display_route:
+			roadmap_render_types.append('waypoints')
+		self.birdeye_render.render(self.display, roadmap_render_types)
 		roadmap = pygame.surfarray.array3d(self.display)
 		roadmap = roadmap[0:self.display_size, :, :]
 		roadmap = self._display_to_rgb(roadmap)
@@ -512,9 +524,13 @@ class CarlaEnv(gym.Env):
 		lidar[:,:,0] = np.array(lidar[:,:,0]>0, dtype=np.uint8)
 		lidar[:,:,1] = np.array(lidar[:,:,1]>0, dtype=np.uint8)
 		# Add the waypoints to lidar image
-		wayptimg = (birdeye[:,:,0] <= 10) * (birdeye[:,:,1] <= 10) * (birdeye[:,:,2] >= 240)
+		if self.display_route:
+			wayptimg = (birdeye[:,:,0] <= 10) * (birdeye[:,:,1] <= 10) * (birdeye[:,:,2] >= 240)
+		else:
+			wayptimg = birdeye[:,:,0] < 0  # Equal to a zero matrix
 		wayptimg = np.expand_dims(wayptimg, axis=2)
 		wayptimg = np.fliplr(np.rot90(wayptimg, 3))
+
 		# Get the final lidar image
 		lidar = np.concatenate((lidar, wayptimg), axis=2)
 		lidar = np.flip(lidar, axis=1)

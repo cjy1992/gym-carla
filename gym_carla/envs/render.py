@@ -415,6 +415,9 @@ class BirdeyeRender(object):
         # Render Actors
         self.actors_surface = pygame.Surface((self.map_image.surface.get_width(), self.map_image.surface.get_height()))
         self.actors_surface.set_colorkey(COLOR_BLACK)
+
+        self.waypoints_surface = pygame.Surface((self.map_image.surface.get_width(), self.map_image.surface.get_height()))
+        self.waypoints_surface.set_colorkey(COLOR_BLACK)
         
         scaled_original_size = self.original_surface_size * (1.0 / 0.62)
         self.hero_surface = pygame.Surface((scaled_original_size, scaled_original_size)).convert()
@@ -492,7 +495,7 @@ class BirdeyeRender(object):
                     
                 pygame.draw.polygon(surface, color, corners)
 
-    def _render_waypoints(self, surface, waypoints, world_to_pixel):
+    def render_waypoints(self, surface, waypoints, world_to_pixel):
         if self.red_light:
             # purple
             color = pygame.Color(math.floor(0.5*255), 0, math.floor(0.5*255))
@@ -505,8 +508,7 @@ class BirdeyeRender(object):
         corners = [world_to_pixel(p) for p in corners]
         pygame.draw.lines(surface, color, False, corners, 20)
 
-    def render_actors(self, surface, vehicles, walkers, waypoints):
-        self._render_waypoints(surface, waypoints, self.map_image.world_to_pixel)
+    def render_actors(self, surface, vehicles, walkers):
         self._render_hist_actors(surface, vehicles, 'vehicle', self.map_image.world_to_pixel, 10)
         self._render_hist_actors(surface, walkers, 'walker', self.map_image.world_to_pixel, 10)
 
@@ -529,18 +531,25 @@ class BirdeyeRender(object):
         self.render_actors(
             self.actors_surface,
             self.vehicle_polygons,
-            self.walker_polygons,
-            self.waypoints)
+            self.walker_polygons)
+
+        self.waypoints_surface.fill(COLOR_BLACK)
+        self.render_waypoints(
+            self.waypoints_surface, 
+            self.waypoints,
+            self.map_image.world_to_pixel)
 
         # Blit surfaces
         if render_types == None:
             surfaces = [(self.map_image.surface, (0, 0)),
                         (self.actors_surface, (0, 0)),
-                        ]
+                        (self.waypoints_surface, (0, 0)),]
         else:
             surfaces = []
             if 'roadmap' in render_types:
                 surfaces.append((self.map_image.surface, (0, 0)))
+            if 'waypoints' in render_types:
+                surfaces.append((self.waypoints_surface, (0, 0)))
             if 'actors' in render_types:
                 surfaces.append((self.actors_surface, (0, 0)))
 
