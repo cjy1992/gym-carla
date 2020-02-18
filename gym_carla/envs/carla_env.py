@@ -383,19 +383,26 @@ class CarlaEnv(gym.Env):
 		Returns:
 			Bool indicating whether the spawn is successful.
 		"""
-
+		vehicle = None
+		# Check if ego position overlaps with surrounding vehicles
+		overlap = False
 		for idx, poly in self.vehicle_polygons[0].items():
 			poly_center = np.mean(poly, axis=0)
 			ego_center = np.array([transform.location.x, transform.location.y])
 			dis = np.linalg.norm(poly_center - ego_center)
 			if dis > 8:
-				vehicle = self.world.try_spawn_actor(self.ego_bp, transform)
-				break
+				continue
 			else:
-				return False
+				overlap = True
+				break
+
+		if not overlap:
+			vehicle = self.world.try_spawn_actor(self.ego_bp, transform)
+
 		if vehicle is not None:
 			self.ego=vehicle
 			return True
+			
 		return False
 
 	def _set_carla_transform(self, pose):
