@@ -36,7 +36,7 @@ def main():
 		'desired_speed': 8,  # desired speed (m/s)
 		'max_ego_spawn_times': 200,  # maximum times to spawn ego vehicle
 		'target_waypt_index': 5,  # index of the target way point
-		'display_route': False,  # whether to render the desired route
+		'display_route': True,  # whether to render the desired route
 	}
 
 	# Set gym-carla environment
@@ -44,7 +44,7 @@ def main():
 	obs = env.reset()
 
 	while True:
-		action = [1.0, 0.0]
+		action = [2.0, 0.3]
 		obs,r,done,info = env.step(action)
 
 		if done:

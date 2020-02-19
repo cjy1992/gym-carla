@@ -68,8 +68,10 @@ class CarlaEnv(gym.Env):
 			'lidar': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
 			'camera': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
 			'roadmap': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
-			'vh_clas': spaces.Box(low=0, high=1, shape=(self.obs_size, self.obs_size), dtype=np.uint8),
-			'vh_regr': spaces.Box(low=-np.inf, high=np.inf, shape=(self.obs_size, self.obs_size, 6), dtype=np.float32)})
+			'vh_clas': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
+			'vh_regr1': spaces.Box(low=-np.inf, high=np.inf, shape=(self.obs_size, self.obs_size, 3), dtype=np.float32),
+			'vh_regr2': spaces.Box(low=-np.inf, high=np.inf, shape=(self.obs_size, self.obs_size, 3), dtype=np.float32),
+			'state': spaces.Box(np.array([-2, -1, -5, 0]), np.array([2, 1, 30, 1]), dtype=np.float32)})
 
 		# Connect to carla server and get world object
 		print('connecting to Carla server...')
@@ -254,7 +256,7 @@ class CarlaEnv(gym.Env):
 			brake = np.clip(-acc/8,0,1)
 
 		# Apply control
-		act = carla.VehicleControl(throttle=float(throttle), steer=float(steer), brake=float(brake))
+		act = carla.VehicleControl(throttle=float(throttle), steer=float(-steer), brake=float(brake))
 		self.ego.apply_control(act)
 
 		self.world.tick()
@@ -597,24 +599,34 @@ class CarlaEnv(gym.Env):
 		vh_clas_surface = self._rgb_to_display_surface(vh_clas_display)
 		self.display.blit(vh_clas_surface, (self.display_size * 4, 0))
 
+		vh_regr1 = vh_regr[:, :, 0:3]
+		vh_regr2 = vh_regr[:, :, 3:6]
+
 		# Display on pygame
 		pygame.display.flip()
 
-		## State observation,  [waypt_x, waypt_y, speed_ego], where waypt_x and waypt_y 
-		# is the xy position of target waypoint in ego's local coordinate (right-handed), where
-		# ego vehicle is at the origin and heading to the positive x axis
-		target_waypt = self.waypoints[self.target_waypt_index]
-		d_target_waypt = target_waypt[0:2] - np.array([ego_x, ego_y])
-		R = np.array([[np.cos(ego_yaw), np.sin(ego_yaw)],[-np.sin(ego_yaw), np.cos(ego_yaw)]])
-		local_target_waypt = np.matmul(R, np.expand_dims(d_target_waypt, 1))  # [2,1]
-		local_target_waypt = np.squeeze(local_target_waypt)  # [2,]
+		# ## State observation,  [waypt_x, waypt_y, speed_ego], where waypt_x and waypt_y 
+		# # is the xy position of target waypoint in ego's local coordinate (right-handed), where
+		# # ego vehicle is at the origin and heading to the positive x axis
+		# target_waypt = self.waypoints[self.target_waypt_index]
+		# d_target_waypt = target_waypt[0:2] - np.array([ego_x, ego_y])
+		# R = np.array([[np.cos(ego_yaw), np.sin(ego_yaw)],[-np.sin(ego_yaw), np.cos(ego_yaw)]])
+		# local_target_waypt = np.matmul(R, np.expand_dims(d_target_waypt, 1))  # [2,1]
+		# local_target_waypt = np.squeeze(local_target_waypt)  # [2,]
+		# v = self.ego.get_velocity()
+		# speed = np.sqrt(v.x**2 + v.y**2)
+		# state = np.array([local_target_waypt[0], -local_target_waypt[1], speed]) 
+
+		lateral_dis, w = self._get_lane_dis(self.waypoints, ego_x, ego_y)
+		delta_yaw = np.arcsin(np.cross(w, 
+			np.array(np.array([np.cos(ego_yaw), np.sin(ego_yaw)]))))
 		v = self.ego.get_velocity()
 		speed = np.sqrt(v.x**2 + v.y**2)
-		state = np.array([local_target_waypt[0], -local_target_waypt[1], speed]) 
+		state = np.array([lateral_dis, - delta_yaw, speed, self.vehicle_front])
 
 		obs = {'birdeye':birdeye.astype(np.uint8), 'lidar':lidar.astype(np.uint8), 'camera':camera.astype(np.uint8),
-			'roadmap':roadmap.astype(np.uint8), 'vh_clas':vh_clas.astype(np.uint8), 'vh_regr':vh_regr.astype(np.float32),
-			'state': state}
+			'roadmap':roadmap.astype(np.uint8), 'vh_clas':vh_clas_display.astype(np.uint8), 'vh_regr1':vh_regr1.astype(np.float32),
+			'vh_regr2':vh_regr2.astype(np.float32), 'state': state}
 		
 		return obs
 
@@ -637,7 +649,7 @@ class CarlaEnv(gym.Env):
 		ego_x, ego_y = self._get_ego_pos()
 		dis, w = self._get_lane_dis(self.waypoints, ego_x, ego_y)
 		r_out = 0
-		if dis > self.out_lane_thres:
+		if abs(dis) > self.out_lane_thres:
 			r_out = -1
 
 		# longitudinal speed
@@ -674,9 +686,8 @@ class CarlaEnv(gym.Env):
 		vec = np.array([x - waypt[0],y - waypt[1]])
 		lv = np.linalg.norm(np.array(vec))
 		w = np.array([np.cos(waypt[2]/180*np.pi), np.sin(waypt[2]/180*np.pi)])
-		costh = np.dot(vec/lv, w)
-		sinth = np.sqrt(1 - costh**2)
-		dis = lv * sinth
+		cross = np.cross(w, vec/lv)
+		dis = - lv * cross
 		return dis, w
 
 	def _terminal(self):
@@ -700,7 +711,7 @@ class CarlaEnv(gym.Env):
 
 		# If out of lane
 		dis, _ = self._get_lane_dis(self.waypoints, ego_x, ego_y)
-		if dis > self.out_lane_thres:
+		if abs(dis) > self.out_lane_thres:
 			return True
 
 		return False
