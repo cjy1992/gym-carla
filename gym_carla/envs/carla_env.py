@@ -574,17 +574,24 @@ class CarlaEnv(gym.Env):
 		# Display on pygame
 		pygame.display.flip()
 
-		## State observation,  [waypt_x, waypt_y, speed_ego], where waypt_x and waypt_y 
-		# is the xy position of target waypoint in ego's local coordinate (right-handed), where
-		# ego vehicle is at the origin and heading to the positive x axis
-		target_waypt = self.waypoints[self.target_waypt_index][0:2]
-		d_target_waypt = target_waypt - np.array([ego_x, ego_y])
-		R = np.array([[np.cos(ego_yaw), np.sin(ego_yaw)],[-np.sin(ego_yaw), np.cos(ego_yaw)]])
-		local_target_waypt = np.matmul(R, np.expand_dims(d_target_waypt, 1))  # [2,1]
-		local_target_waypt = np.squeeze(local_target_waypt)  # [2,]
+		# ## State observation,  [waypt_x, waypt_y, speed_ego], where waypt_x and waypt_y 
+		# # is the xy position of target waypoint in ego's local coordinate (right-handed), where
+		# # ego vehicle is at the origin and heading to the positive x axis
+		# target_waypt = self.waypoints[self.target_waypt_index][0:2]
+		# d_target_waypt = target_waypt - np.array([ego_x, ego_y])
+		# R = np.array([[np.cos(ego_yaw), np.sin(ego_yaw)],[-np.sin(ego_yaw), np.cos(ego_yaw)]])
+		# local_target_waypt = np.matmul(R, np.expand_dims(d_target_waypt, 1))  # [2,1]
+		# local_target_waypt = np.squeeze(local_target_waypt)  # [2,]
+		# v = self.ego.get_velocity()
+		# speed = np.sqrt(v.x**2 + v.y**2)
+		# state = np.array([local_target_waypt[0], -local_target_waypt[1], speed]) 
+
+		lateral_dis, w = self._get_lane_dis(self.waypoints, ego_x, ego_y)
+		yaw_waypt = np.arctan2(w[1], w[0])
+		delta_yaw = ego_yaw - yaw_waypt
 		v = self.ego.get_velocity()
 		speed = np.sqrt(v.x**2 + v.y**2)
-		state = np.array([local_target_waypt[0], -local_target_waypt[1], speed]) 
+		state = np.array([- lateral_dis, - delta_yaw, speed]) 
 
 		obs = {'birdeye': birdeye, 'lidar': lidar, 'camera': camera, 
 			'vh_clas': vh_clas, 'vh_reg_map': vh_regr, 'state': state}
