@@ -250,7 +250,7 @@ class CarlaEnv(gym.Env):
 			brake = np.clip(-acc/8,0,1)
 
 		# Apply control
-		act = carla.VehicleControl(throttle=float(throttle), steer=float(steer), brake=float(brake))
+		act = carla.VehicleControl(throttle=float(throttle), steer=float(-steer), brake=float(brake))
 		self.ego.apply_control(act)
 
 		self.world.tick()
@@ -586,12 +586,12 @@ class CarlaEnv(gym.Env):
 		# state = np.array([local_target_waypt[0], -local_target_waypt[1], speed]) 
 
 		lateral_dis, w = self._get_lane_dis(self.waypoints, ego_x, ego_y)
-		yaw_waypt = np.arctan2(w[1], w[0])
-		delta_yaw = ego_yaw - yaw_waypt
+		delta_yaw = np.arcsin(np.cross(w, 
+			np.array(np.array([np.cos(ego_yaw), np.sin(ego_yaw)]))))
 		v = self.ego.get_velocity()
 		speed = np.sqrt(v.x**2 + v.y**2)
-		state = np.array([- lateral_dis, - delta_yaw, speed]) 
-
+		state = np.array([lateral_dis, - delta_yaw, speed]) 
+		
 		obs = {'birdeye': birdeye, 'lidar': lidar, 'camera': camera, 
 			'vh_clas': vh_clas, 'vh_reg_map': vh_regr, 'state': state}
 		
@@ -616,7 +616,7 @@ class CarlaEnv(gym.Env):
 		ego_x, ego_y = self._get_ego_pos()
 		dis, w = self._get_lane_dis(self.waypoints, ego_x, ego_y)
 		r_out = 0
-		if dis > self.out_lane_thres:
+		if abs(dis) > self.out_lane_thres:
 			r_out = -1
 
 		# longitudinal speed
@@ -653,9 +653,8 @@ class CarlaEnv(gym.Env):
 		vec = np.array([x - waypt[0],y - waypt[1]])
 		lv = np.linalg.norm(np.array(vec))
 		w = np.array([np.cos(waypt[2]/180*np.pi), np.sin(waypt[2]/180*np.pi)])
-		costh = np.dot(vec/lv, w)
-		sinth = np.sqrt(1 - costh**2)
-		dis = lv * sinth
+		cross = np.cross(w, vec/lv)
+		dis = - lv * cross
 		return dis, w
 
 	def _terminal(self):
@@ -679,7 +678,7 @@ class CarlaEnv(gym.Env):
 
 		# If out of lane
 		dis, _ = self._get_lane_dis(self.waypoints, ego_x, ego_y)
-		if dis > self.out_lane_thres:
+		if abs(dis) > self.out_lane_thres:
 			return True
 
 		return False
