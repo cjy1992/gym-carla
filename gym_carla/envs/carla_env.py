@@ -138,7 +138,7 @@ class CarlaEnv(gym.Env):
 		self._set_synchronous_mode(False)
 
 		# Spawn surrounding vehicles
-		random.shuffle(self.vehicle_spawn_points)
+		# random.shuffle(self.vehicle_spawn_points)
 		count = self.number_of_vehicles
 		if count > 0:
 			for spawn_point in self.vehicle_spawn_points:
@@ -178,7 +178,8 @@ class CarlaEnv(gym.Env):
 				self.reset()
 
 			if self.task_mode == 'random':
-				transform = random.choice(self.vehicle_spawn_points)
+				transform = self.vehicle_spawn_points[-1]
+				# transform = random.choice(self.vehicle_spawn_points)
 			if self.task_mode == 'roundabout':
 				# self.start=[52.1+np.random.uniform(-5,5),-4.2, 178.66] # random
 				self.start=[52.1,-4.2, 178.66] # static
