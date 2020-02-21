@@ -617,10 +617,11 @@ class CarlaEnv(gym.Env):
         delta_s = np.sqrt((ego_x - front_x) ** 2 + (ego_y - front_y) ** 2)
         delta_v = np.sqrt((v.x - front_v.x) ** 2 + (v.y - front_v.y) ** 2)
 
-        state = np.array([lateral_dis, - delta_yaw, speed, delta_s, delta_v])
+        tracking = np.array([lateral_dis, - delta_yaw, speed])
+        obs_avoi = np.array([delta_s, delta_v])
 
         obs = {'birdeye': birdeye, 'lidar': lidar, 'camera': camera,
-               'vh_clas': vh_clas, 'vh_reg_map': vh_regr, 'state': state}
+               'vh_clas': vh_clas, 'vh_reg_map': vh_regr, 'tracking': tracking, 'obs_avoi': obs_avoi}
 
         # TODO: front vehicle set starting speed --> read ego vehicle setting & design reward function
 
