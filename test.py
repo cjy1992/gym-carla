@@ -13,7 +13,7 @@ import carla
 def main():
 	# parameters for the gym_carla environment
 	params = {
-		'number_of_vehicles': 10,
+		'number_of_vehicles': 0,
 		'number_of_walkers': 0,
 		'display_size': 256,  # screen size of bird-eye render
 		'max_past_step': 1,  # the number of past steps to draw
