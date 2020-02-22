@@ -29,6 +29,7 @@ class CarlaEnv(gym.Env):
 
     def __init__(self, params):
         # parameters
+        self.x0 = params['x0']
         self.display_size = params['display_size']  # rendering screen size
         self.max_past_step = params['max_past_step']
         self.number_of_vehicles = params['number_of_vehicles']
@@ -154,9 +155,13 @@ class CarlaEnv(gym.Env):
             if self._try_spawn_random_vehicle_at(random.choice(self.vehicle_spawn_points), number_of_wheels=[4]):
                 count -= 1
 
-        self._try_spawn_random_vehicle_at(self._set_carla_transform([217.7, 129.4758, 180.0]),
+        self._try_spawn_random_vehicle_at(self._set_carla_transform([self.x0-20, 129.5, 180.0]),
                                           number_of_wheels=[4],
                                           autopilot_bool=False)
+
+        # self._try_spawn_random_vehicle_at(self._set_carla_transform([32.1, -4.2, 178.66]),
+        #                                    number_of_wheels=[4],
+        #                                    autopilot_bool=True)
 
         # Spawn pedestrians
         random.shuffle(self.walker_spawn_points)
@@ -186,7 +191,7 @@ class CarlaEnv(gym.Env):
                 self.reset()
 
             if self.task_mode == 'random':
-                self.start = [237.7, 129.4758, 180.0]  # static
+                self.start = [self.x0, 129.5, 180.0]  # static
                 transform = self._set_carla_transform(self.start)
             # transform = random.choice(self.vehicle_spawn_points)
             if self.task_mode == 'roundabout':
