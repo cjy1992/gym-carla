@@ -155,7 +155,7 @@ class CarlaEnv(gym.Env):
             if self._try_spawn_random_vehicle_at(random.choice(self.vehicle_spawn_points), number_of_wheels=[4]):
                 count -= 1
 
-        self._try_spawn_random_vehicle_at(self._set_carla_transform([self.x0-20, 129.5, 180.0]),
+        self._try_spawn_random_vehicle_at(self._set_carla_transform([self.x0-20, 129.0, 180.0]),
                                           number_of_wheels=[4],
                                           autopilot_bool=False)
 
@@ -359,7 +359,7 @@ class CarlaEnv(gym.Env):
 		Returns:
 			Bool indicating whether the spawn is successful.
 		"""
-        blueprint = self._create_vehicle_bluepprint('vehicle.*', number_of_wheels=number_of_wheels)
+        blueprint = self._create_vehicle_bluepprint('vehicle.tesla.model3', number_of_wheels=number_of_wheels)
         blueprint.set_attribute('role_name', 'autopilot')
         vehicle = self.world.try_spawn_actor(blueprint, transform)
         self.front_car = vehicle  # here there is only one vehicle
