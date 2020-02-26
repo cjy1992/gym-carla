@@ -13,7 +13,7 @@ import carla
 def main():
 	# parameters for the gym_carla environment
 	params = {
-		'number_of_vehicles': 0,
+		'number_of_vehicles': 200,
 		'number_of_walkers': 0,
 		'display_size': 256,  # screen size of bird-eye render
 		'max_past_step': 1,  # the number of past steps to draw
@@ -25,7 +25,7 @@ def main():
 		'continuous_steer_range': [-0.3, 0.3],  # continuous steering angle range
 		'ego_vehicle_filter': 'vehicle.lincoln*',  # filter for defining ego vehicle
 		'port': 2000,  # connection port
-		'town': 'Town03',  # which town to simulate
+		'town': 'Town01',  # which town to simulate
 		'task_mode': 'random',  # mode of the task, [random, roundabout (only for Town03)]
 		'max_time_episode': 1000,  # maximum timesteps per episode
 		'max_waypt': 12,  # maximum number of waypoints

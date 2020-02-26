@@ -29,7 +29,7 @@ class CarlaEnv(gym.Env):
 
     def __init__(self, params):
         # parameters
-        self.x0 = params['x0']
+        # self.x0 = params['x0']
         self.display_size = params['display_size']  # rendering screen size
         self.max_past_step = params['max_past_step']
         self.number_of_vehicles = params['number_of_vehicles']
@@ -155,9 +155,9 @@ class CarlaEnv(gym.Env):
             if self._try_spawn_random_vehicle_at(random.choice(self.vehicle_spawn_points), number_of_wheels=[4]):
                 count -= 1
 
-        self._try_spawn_random_vehicle_at(self._set_carla_transform([self.x0-20, 129.0, 180.0]),
-                                          number_of_wheels=[4],
-                                          autopilot_bool=False)
+        # self._try_spawn_random_vehicle_at(self._set_carla_transform([self.x0-20, 129.0, 180.0]),
+        #                                   number_of_wheels=[4],
+        #                                   autopilot_bool=False)
 
         # self._try_spawn_random_vehicle_at(self._set_carla_transform([32.1, -4.2, 178.66]),
         #                                    number_of_wheels=[4],
@@ -177,9 +177,9 @@ class CarlaEnv(gym.Env):
                 count -= 1
 
         # Get actors polygon list
-        self.vehicle_polygons = []
-        vehicle_poly_dict = self._get_actor_polygons('vehicle.*')
-        self.vehicle_polygons.append(vehicle_poly_dict)
+        self.vehicle_polygons = [{}]
+        #vehicle_poly_dict = self._get_actor_polygons('vehicle.*')
+        #self.vehicle_polygons.append(vehicle_poly_dict)
         self.walker_polygons = []
         walker_poly_dict = self._get_actor_polygons('walker.*')
         self.walker_polygons.append(walker_poly_dict)
@@ -191,12 +191,15 @@ class CarlaEnv(gym.Env):
                 self.reset()
 
             if self.task_mode == 'random':
-                self.start = [self.x0, 129.5, 180.0]  # static
+                self.start = [300, 129.5, 180.0]  # static
                 transform = self._set_carla_transform(self.start)
-            # transform = random.choice(self.vehicle_spawn_points)
+                #transform = random.choice(self.vehicle_spawn_points)
+            if self.task_mode == 'rightturn':
+                self.start = [374, 2.2, 0.0]  # static
+                transform = self._set_carla_transform(self.start)
             if self.task_mode == 'roundabout':
                 # self.start=[52.1+np.random.uniform(-5,5),-4.2, 178.66] # random
-                self.start = [52.1, -4.2, 178.66]  # static
+                self.start = [32.1, -4, 178.66]  # static
                 transform = self._set_carla_transform(self.start)
             if self._try_spawn_ego_vehicle_at(transform):
                 break
@@ -249,7 +252,7 @@ class CarlaEnv(gym.Env):
         # Set ego information for render
         self.birdeye_render.set_hero(self.ego, self.ego.id)
 
-        return self._get_obs()
+        return self._get_obs()['tracking']
 
     def step(self, action):
         # Calculate acceleration and steering
@@ -297,7 +300,10 @@ class CarlaEnv(gym.Env):
         self.time_step += 1
         self.total_step += 1
 
-        return self._get_obs(), self._get_reward(), self._terminal(), copy.deepcopy(info)
+        obs = self._get_obs()['tracking']
+        cost = 1/2 * action[0]**2 + 5 * action[1]**2 + 1/2 * obs[0]**2 + 500 * obs[1]**2 + 500 * (obs[2]-3)**2
+
+        return obs, -cost, False, copy.deepcopy(info)
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
@@ -615,18 +621,18 @@ class CarlaEnv(gym.Env):
         speed = np.sqrt(v.x ** 2 + v.y ** 2)
 
         # delta state: state difference between ego and front car
-        front_trans = self.front_car.get_transform()
-        front_x = front_trans.location.x
-        front_y = front_trans.location.y
-        front_v = self.front_car.get_velocity()
-        delta_s = np.sqrt((ego_x - front_x) ** 2 + (ego_y - front_y) ** 2)
-        delta_v = np.sqrt((v.x - front_v.x) ** 2 + (v.y - front_v.y) ** 2)
+        # front_trans = self.front_car.get_transform()
+        # front_x = front_trans.location.x
+        # front_y = front_trans.location.y
+        # front_v = self.front_car.get_velocity()
+        # delta_s = np.sqrt((ego_x - front_x) ** 2 + (ego_y - front_y) ** 2)
+        # delta_v = np.sqrt((v.x - front_v.x) ** 2 + (v.y - front_v.y) ** 2)
 
         tracking = np.array([lateral_dis, - delta_yaw, speed])
-        obs_avoi = np.array([delta_s, delta_v])
+        # obs_avoi = np.array([delta_s, delta_v])
 
         obs = {'birdeye': birdeye, 'lidar': lidar, 'camera': camera,
-               'vh_clas': vh_clas, 'vh_reg_map': vh_regr, 'tracking': tracking, 'obs_avoi': obs_avoi}
+               'vh_clas': vh_clas, 'vh_reg_map': vh_regr, 'tracking': tracking}#, 'obs_avoi': obs_avoi}
 
         # TODO: front vehicle set starting speed --> read ego vehicle setting & design reward function
 
