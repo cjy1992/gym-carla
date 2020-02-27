@@ -27,9 +27,35 @@ from gym_carla.envs.route_planner import RoutePlanner
 class CarlaEnv(gym.Env):
     """An OpenAI gym wrapper for CARLA simulator."""
 
-    def __init__(self, params):
+    def __init__(self):
+        params = {
+            'number_of_vehicles': 0,
+            'number_of_walkers': 0,
+            'display_size': 256,  # screen size of bird-eye render
+            'max_past_step': 1,  # the number of past steps to draw
+            'dt': 0.1,  # time interval between two frames
+            'discrete': False,  # whether to use discrete control space
+            'discrete_acc': [-3.0, 0.0, 3.0],  # discrete value of accelerations
+            'discrete_steer': [-0.2, 0.0, 0.2],  # discrete value of steering angles
+            'continuous_accel_range': [-3.0, 3.0],  # continuous acceleration range
+            'continuous_steer_range': [-0.3, 0.3],  # continuous steering angle range
+            'ego_vehicle_filter': 'vehicle.tesla.model3',  # filter for defining ego vehicle
+            'port': 2000,  # connection port
+            'town': 'Town01',  # which town to simulate
+            'task_mode': 'random',  # mode of the task, [random, roundabout (only for Town03)]
+            'max_time_episode': 1000,  # maximum timesteps per episode
+            'max_waypt': 12,  # maximum number of waypoints
+            'obs_range': 32,  # observation range (meter)
+            'lidar_bin': 0.125,  # bin size of lidar sensor (meter)
+            'd_behind': 12,  # distance behind the ego vehicle (meter)
+            'out_lane_thres': 2.0,  # threshold for out of lane
+            'desired_speed': 8,  # desired speed (m/s)
+            'max_ego_spawn_times': 100,  # maximum times to spawn ego vehicle
+            'target_waypt_index': 1,  # index of the target way point
+        }
         # parameters
         # self.x0 = params['x0']
+        self.params = params
         self.display_size = params['display_size']  # rendering screen size
         self.max_past_step = params['max_past_step']
         self.number_of_vehicles = params['number_of_vehicles']
@@ -66,11 +92,14 @@ class CarlaEnv(gym.Env):
                                            np.array([params['continuous_accel_range'][1],
                                                      params['continuous_steer_range'][1]]),
                                            dtype=np.float32)  # acc, steer
+        self.observation_space = spaces.Box(-np.ones(3)*10, np.ones(3)*10, dtype=np.float32)
+        """
         self.observation_space = spaces.Dict(
             {'birdeye': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
              'lidar': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
              'camera': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8)})
 
+        
         # Connect to carla server and get world object
         print('connecting to Carla server...')
         client = carla.Client('localhost', params['port'])
@@ -128,8 +157,74 @@ class CarlaEnv(gym.Env):
 
         # Initialize the renderer
         self._init_renderer()
+        """
 
     def reset(self):
+        settings = [
+            {'town': 'Town01', 'start': [300, 129.5, 180.0]},
+            {'town': 'Town01', 'start': [374, 2.2, 0.0]},
+            {'town': 'Town03', 'start': [32.1, -4, 178.66]},
+        ]
+        setting = random.choice(settings)
+        # Connect to carla server and get world object
+        print('connecting to Carla server...')
+        client = carla.Client('localhost', self.params['port'])
+        client.set_timeout(10.0)
+        self.world = client.load_world(setting['town'])
+        print('Carla server connected!')
+
+        # Set weather
+        self.world.set_weather(carla.WeatherParameters.ClearNoon)
+
+        # Get spawn points
+        self.vehicle_spawn_points = list(self.world.get_map().get_spawn_points())
+        self.walker_spawn_points = []
+        for i in range(self.number_of_walkers):
+            spawn_point = carla.Transform()
+            loc = self.world.get_random_location_from_navigation()
+            if (loc != None):
+                spawn_point.location = loc
+                self.walker_spawn_points.append(spawn_point)
+
+        # Create the ego vehicle blueprint
+        self.ego_bp = self._create_vehicle_bluepprint(self.params['ego_vehicle_filter'], color='49,8,8')
+
+        # Collision sensor
+        self.collision_hist = []  # The collision history
+        self.collision_hist_l = 1  # collision history length
+        self.collision_bp = self.world.get_blueprint_library().find('sensor.other.collision')
+
+        # Lidar sensor
+        self.lidar_data = None
+        self.lidar_height = 2.1
+        self.lidar_trans = carla.Transform(carla.Location(x=0.0, z=self.lidar_height))
+        self.lidar_bp = self.world.get_blueprint_library().find('sensor.lidar.ray_cast')
+        self.lidar_bp.set_attribute('channels', '32')
+        self.lidar_bp.set_attribute('range', '5000')
+
+        # Camera sensor
+        self.camera_img = np.zeros((self.obs_size, self.obs_size, 3), dtype=np.uint8)
+        self.camera_trans = carla.Transform(carla.Location(x=0.8, z=1.7))
+        self.camera_bp = self.world.get_blueprint_library().find('sensor.camera.rgb')
+        # Modify the attributes of the blueprint to set image resolution and field of view.
+        self.camera_bp.set_attribute('image_size_x', str(self.obs_size))
+        self.camera_bp.set_attribute('image_size_y', str(self.obs_size))
+        self.camera_bp.set_attribute('fov', '110')
+        # Set the time in seconds between sensor captures
+        self.camera_bp.set_attribute('sensor_tick', '0.02')
+
+        # Set fixed simulation step for synchronous mode
+        self.settings = self.world.get_settings()
+        self.settings.fixed_delta_seconds = self.dt
+
+        # Record the time of total steps and resetting steps
+        self.reset_step = 0
+        self.total_step = 0
+
+        # Initialize the renderer
+        self._init_renderer()
+        ###############################################################################################
+
         # Clear sensor objects
         self.collision_sensor = None
         self.lidar_sensor = None
@@ -177,9 +272,9 @@ class CarlaEnv(gym.Env):
                 count -= 1
 
         # Get actors polygon list
-        self.vehicle_polygons = [{}]
-        #vehicle_poly_dict = self._get_actor_polygons('vehicle.*')
-        #self.vehicle_polygons.append(vehicle_poly_dict)
+        self.vehicle_polygons = []
+        vehicle_poly_dict = self._get_actor_polygons('vehicle.*')
+        self.vehicle_polygons.append(vehicle_poly_dict)
         self.walker_polygons = []
         walker_poly_dict = self._get_actor_polygons('walker.*')
         self.walker_polygons.append(walker_poly_dict)
@@ -189,7 +284,8 @@ class CarlaEnv(gym.Env):
         while True:
             if ego_spawn_times > self.max_ego_spawn_times:
                 self.reset()
-
+            transform = self._set_carla_transform(setting['start'])
+            """
             if self.task_mode == 'random':
                 self.start = [300, 129.5, 180.0]  # static
                 transform = self._set_carla_transform(self.start)
@@ -201,6 +297,7 @@ class CarlaEnv(gym.Env):
                 # self.start=[52.1+np.random.uniform(-5,5),-4.2, 178.66] # random
                 self.start = [32.1, -4, 178.66]  # static
                 transform = self._set_carla_transform(self.start)
+                """
             if self._try_spawn_ego_vehicle_at(transform):
                 break
             else:
