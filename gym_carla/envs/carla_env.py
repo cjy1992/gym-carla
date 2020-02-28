@@ -27,7 +27,33 @@ from gym_carla.envs.route_planner import RoutePlanner
 class CarlaEnv(gym.Env):
     """An OpenAI gym wrapper for CARLA simulator."""
 
-    def __init__(self, params):
+    def __init__(self):
+        params = {
+            'x0': 320,
+            'number_of_vehicles': 0,
+            'number_of_walkers': 0,
+            'display_size': 256,  # screen size of bird-eye render
+            'max_past_step': 1,  # the number of past steps to draw
+            'dt': 0.1,  # time interval between two frames
+            'discrete': False,  # whether to use discrete control space
+            'discrete_acc': [-3.0, 0.0, 3.0],  # discrete value of accelerations
+            'discrete_steer': [-0.2, 0.0, 0.2],  # discrete value of steering angles
+            'continuous_accel_range': [-3.0, 3.0],  # continuous acceleration range
+            'continuous_steer_range': [-0.3, 0.3],  # continuous steering angle range
+            'ego_vehicle_filter': 'vehicle.tesla.model3',  # filter for defining ego vehicle
+            'port': 8500,  # connection port
+            'town': 'Town01',  # which town to simulate
+            'task_mode': 'random',  # mode of the task, [random, roundabout (only for Town03)]
+            'max_time_episode': 1000,  # maximum timesteps per episode
+            'max_waypt': 12,  # maximum number of waypoints
+            'obs_range': 32,  # observation range (meter)
+            'lidar_bin': 0.125,  # bin size of lidar sensor (meter)
+            'd_behind': 12,  # distance behind the ego vehicle (meter)
+            'out_lane_thres': 2.0,  # threshold for out of lane
+            'desired_speed': 8,  # desired speed (m/s)
+            'max_ego_spawn_times': 100,  # maximum times to spawn ego vehicle
+            'target_waypt_index': 1,  # index of the target way point
+        }
         # parameters
         self.display_size = params['display_size']  # rendering screen size
         self.max_past_step = params['max_past_step']
@@ -243,8 +269,8 @@ class CarlaEnv(gym.Env):
 
         # Set ego information for render
         self.birdeye_render.set_hero(self.ego, self.ego.id)
-
-        return self._get_obs()
+        lowd_obs = np.concatenate((self._get_obs()['tracking'], self._get_obs()['obs_avoi']))
+        return lowd_obs
 
     def step(self, action):
         # Calculate acceleration and steering
@@ -292,7 +318,10 @@ class CarlaEnv(gym.Env):
         self.time_step += 1
         self.total_step += 1
 
-        return self._get_obs(), self._get_reward(), self._terminal(), copy.deepcopy(info)
+        obs = self._get_obs()['tracking']
+        cost = 1 / 2 * action[0] ** 2 + 5 * action[1] ** 2 + 1 / 2 * obs[0] ** 2 + 500 * obs[1] ** 2 + 500 * (obs[2] - 3) ** 2
+        lowd_obs = np.concatenate((self._get_obs()['tracking'], self._get_obs()['obs_avoi']))
+        return lowd_obs, -cost, self._terminal(), copy.deepcopy(info)
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
