@@ -2,27 +2,32 @@
 A Gym wrapper for CARLA simulator
 
 ## System Requirements
-- Linux
-- Python = 3.5
+- Ubuntu 16.04
 
 ## Installation
+1. Setup conda environment
+```
+$ conda create -n env_name python=3.6
+$ conda activate env_name
+$ pip install -r requirements
+```
 
-1. Clone this git repo
+2. Clone this git repo
 ```
 $ git clone https://github.com/cjy1992/gym-carla.git
 ```
 
-2. Enter the repo root folder and install the package:
+3. Enter the repo root folder and install the package:
 ```
 $ pip install -e .
 ```
 
-3. Download [CARLA_0.9.6](https://github.com/carla-simulator/carla/releases/tag/0.9.6), extract it to some folder, and add CARLA to ```PYTHONPATH``` environment variable:
+4. Download [CARLA_0.9.6](https://github.com/carla-simulator/carla/releases/tag/0.9.6), extract it to some folder, and add CARLA to ```PYTHONPATH``` environment variable:
 ```
 $ export PYTHONPATH=$PYTHONPATH:$YourFolder$/CARLA_0.9.6/PythonAPI/carla/dist/carla-0.9.6-py3.5-linux-x86_64.egg
 ```
 
-4. Enter the CARLA root folder and launch the CARLA server by:
+5. Enter the CARLA root folder and launch the CARLA server by:
 ```
 $ ./CarlaUE4.sh -windowed
 ```
