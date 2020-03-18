@@ -9,7 +9,6 @@ A Gym wrapper for CARLA simulator
 ```
 $ conda create -n env_name python=3.6
 $ conda activate env_name
-$ pip install -r requirements
 ```
 
 2. Clone this git repo
@@ -19,6 +18,7 @@ $ git clone https://github.com/cjy1992/gym-carla.git
 
 3. Enter the repo root folder and install the package:
 ```
+$ pip install -r requirements.txt
 $ pip install -e .
 ```
 
