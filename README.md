@@ -11,7 +11,7 @@ $ conda create -n env_name python=3.6
 $ conda activate env_name
 ```
 
-2. Clone this git repo
+2. Clone this git repo in an appropriate folder
 ```
 $ git clone https://github.com/cjy1992/gym-carla.git
 ```
@@ -54,3 +54,10 @@ See details of ```test.py``` about how to use the CARLA gym wrapper.
 2. The termination condition is either the ego vehicle collides, runs out of lane, reaches a destination, or reaches the maximum episode timesteps. Users may modify function _terminal in carla_env.py to enable customized termination condition.
 
 3. The reward is a weighted combination of longitudinal speed and penalties for collision, exceeding maximum speed, out of lane, large steering and large lateral accleration.  Users may modify function _get_reward in carla_env.py to enable customized termination condition.
+
+## Related Repos
+### Deep Reinforcement Learning for Autonomous Driving
+- See [https://github.com/cjy1992/interp-e2e-driving](https://github.com/cjy1992/interp-e2e-driving), which provides implementations for the paper [Interpretable End-to-end Urban Autonomous Driving with Latent Deep Reinforcement Learning](https://arxiv.org/abs/2001.08726) and paper [Model-free Deep Reinforcement Learning for Urban Autonomous Driving](https://ieeexplore.ieee.org/abstract/document/8917306), as well as several deep RL baselines for autonomous driving on CARLA.
+
+
+
