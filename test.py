@@ -45,9 +45,10 @@ def main():
   while True:
     action = [2.0, 0.0]
     obs,r,done,info = env.step(action)
+    #print(obs)
 
-    if done:
-      obs = env.reset()
+    # if done:
+    #   obs = env.reset()
 
 
 if __name__ == '__main__':

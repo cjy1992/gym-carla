@@ -73,7 +73,8 @@ class CarlaEnv(gym.Env):
       'vh_clas': spaces.Box(low=0, high=1, shape=(self.pixor_size, self.pixor_size, 1), dtype=np.float32),
       'vh_regr': spaces.Box(low=-5, high=5, shape=(self.pixor_size, self.pixor_size, 6), dtype=np.float32),
       'state': spaces.Box(np.array([-2, -1, -5, 0]), np.array([2, 1, 30, 1]), dtype=np.float32),
-      'pixor_state': spaces.Box(np.array([-1000, -1000, -1, -1, -5]), np.array([1000, 1000, 1, 1, 20]), dtype=np.float32)})
+      'pixor_state': spaces.Box(np.array([-1000, -1000, -1, -1, -5]), np.array([1000, 1000, 1, 1, 20]), dtype=np.float32),
+      'costmap': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 1), dtype=np.uint8)})
 
     # Connect to carla server and get world object
     print('connecting to Carla server...')
@@ -290,7 +291,6 @@ class CarlaEnv(gym.Env):
     # Update timesteps
     self.time_step += 1
     self.total_step += 1
-
     return (self._get_obs(), self._get_reward(), self._terminal(), copy.deepcopy(info))
 
   def seed(self, seed=None):
@@ -671,6 +671,92 @@ class CarlaEnv(gym.Env):
 
     # Pixor state, [x, y, cos(yaw), sin(yaw), speed]
     pixor_state = [ego_x, ego_y, np.cos(ego_yaw), np.sin(ego_yaw), speed]
+
+    #waypoints is a python list of [waypoint.transform.location.x (float), waypoint.transform.location.y (float), waypoint.transform.rotation.yaw (float degrees)]
+    # Generates a Costmap for all waypoints
+    def _get_costmap(actualWaypoints, cost):
+      #iterate through all actualwaypoints (not just the carla_env.waypoints because they are not true waypoints)
+      # leftWaypoint = waypoint.get_left_lane
+      # rightWaypoint = waypoint.get_right_lane
+      #set waypoint + neightbor to cost
+      costmap = np.zeros((self.obs_size, self.obs_size))
+
+      for (waypoint, _) in actualWaypoints:
+        laneWidth = waypoint.lane_width
+        x_center = waypoint.transform.location.x
+        y1 = cost
+        x2 = x_center - laneWidth
+        y2 = y3 = 0
+        x3 = x_center + laneWidth
+        y_center = waypoint.transform.location.y
+
+        #centerQuad returns a cost for any x between x2 and x3
+        centerQuad = _get_quadratic(x_center, y1, x2, y2, x3, y3)
+        print("Ego_x: " + str(ego_x) + ", Ego_y: " + str(ego_y))
+        print("X_center: " + str(x_center) + ", y_center" + str(y_center))
+        #for a lane, all y should be the same 
+        local_y = int((self.obs_size // 2) + ((y_center - ego_y) / self.lidar_bin))
+
+
+        for x in np.arange(x2, x3, self.lidar_bin):
+          local_x = int((self.obs_size // 2) + ((x - ego_x) / self.lidar_bin))
+          print("Local X: " + str(local_x) + ", Local Y: " + str(local_y))
+          costmap[local_x, local_y] = centerQuad(x)
+          print(costmap[local_x, local_y]) 
+
+        leftQuad = rightQuad = None
+
+        leftWaypoint = waypoint.get_left_lane()
+        rightWaypoint = waypoint.get_right_lane()
+        
+        #check if left lane exists          
+        if leftWaypoint:
+          x_left = leftWaypoint.transform.location.x
+          x4 = x_left - laneWidth
+          leftQuad = _get_quadratic(x_left, y1, x2, y2, x4, y3)
+
+          for x in np.arange(x4, x2, self.lidar_bin):
+            local_x = int((self.obs_size // 2) + ((x - ego_x) / self.lidar_bin))
+            costmap[local_x, local_y] = centerQuad(x)    
+
+        #check if right lane exists
+        if rightWaypoint:
+          x_right = rightWaypoint.transform.location.x
+          x5 = x_right + laneWidth
+          rightQuad = _get_quadratic(x_right, y1, x3, y2, x5, y3)
+          for x in np.arange(x3, x5, self.lidar_bin):
+            local_x = int((self.obs_size // 2) + ((x - ego_x) / self.lidar_bin))
+            costmap[local_x, local_y] = centerQuad(x) 
+
+
+        #center of the map should be ego_x, ego_y. total height and length of map is self.obs_range, separated by self.lidar_bin
+        #in local coordinates, center is self.obs_size / 2, self.obs_size /2 == global coordinates ego_x, ego_y
+        #(self.obs_size / 2) + x in local coordinates is the same thing as ego_x + x*self.lidar_bin 
+
+        
+      return costmap
+
+    #returns a quadratic function given 3 unique points
+    def _get_quadratic(x1, y1, x2, y2, x3, y3):
+      denom = (x1-x2) * (x1-x3) * (x2-x3);
+      a     = (x3 * (y2-y1) + x2 * (y1-y3) + x1 * (y3-y2)) / denom;
+      b     = (x3*x3 * (y1-y2) + x2*x2 * (y3-y1) + x1*x1 * (y2-y3)) / denom;
+      c     = (x2 * x3 * (x2-x3) * y1+x3 * x1 * (x3-x1) * y2+x1 * x2 * (x1-x2) * y3) / denom;
+      
+      #we can calculate cost for any x between x2 and x3
+      return lambda x: a*(x**2) + b*x + c  
+
+    cost = -10
+    costmap = _get_costmap(self.routeplanner._actualWaypoints, -10)
+    #print("Costmap: " + str(costmap))
+
+    # actualWaypointsList = []
+    # for (waypoint, _) in self.routeplanner._actualWaypoints:
+    #   tup = (waypoint.transform.location.x, waypoint.transform.location.y)
+    #   actualWaypointsList.append(tup)
+    # print("Actual Waypoints: " + str(actualWaypointsList))
+    # print("Waypoints List: " + str(self.waypoints))
+
 
     obs = {}
     obs.update({

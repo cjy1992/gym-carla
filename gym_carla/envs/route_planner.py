@@ -47,8 +47,8 @@ class RoutePlanner():
 
     self._last_traffic_light = None
     self._proximity_threshold = 15.0
-
     self._compute_next_waypoints(k=200)
+    self._actualWaypoints = None
 
   def _compute_next_waypoints(self, k=1):
     """
@@ -114,6 +114,7 @@ class RoutePlanner():
     for i, (waypoint, _) in enumerate(self._waypoint_buffer):
       waypoints.append([waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
 
+    self._actualWaypoints = self._waypoint_buffer
     # current vehicle waypoint
     self._current_waypoint = self._map.get_waypoint(self._vehicle.get_location())
     # target waypoint
