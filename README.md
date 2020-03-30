@@ -59,5 +59,8 @@ See details of ```test.py``` about how to use the CARLA gym wrapper.
 ### Deep Reinforcement Learning for Autonomous Driving
 - See [https://github.com/cjy1992/interp-e2e-driving](https://github.com/cjy1992/interp-e2e-driving), which provides implementations for the paper [Interpretable End-to-end Urban Autonomous Driving with Latent Deep Reinforcement Learning](https://arxiv.org/abs/2001.08726) and paper [Model-free Deep Reinforcement Learning for Urban Autonomous Driving](https://ieeexplore.ieee.org/abstract/document/8917306), as well as several deep RL baselines for autonomous driving on CARLA.
 
+### Autonomous Driving Perception
+- See [https://github.com/cjy1992/detect-loc-map](https://github.com/cjy1992/detect-loc-map), which provides implementations for the paper [End-to-end Autonomous Driving Perception with Sequential Latent Representation Learning](https://arxiv.org/abs/2003.12464).
+
 
 
