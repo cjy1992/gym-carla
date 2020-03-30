@@ -48,6 +48,7 @@ class CarlaEnv(gym.Env):
     self.max_ego_spawn_times = params['max_ego_spawn_times']
     self.display_route = params['display_route']
     self.pixor_size = params['pixor_size']
+    self.pixor = params['pixor']
 
     # Destination
     if params['task_mode'] == 'roundabout':
@@ -66,14 +67,20 @@ class CarlaEnv(gym.Env):
       self.action_space = spaces.Box(np.array([params['continuous_accel_range'][0], 
       params['continuous_steer_range'][0]]), np.array([params['continuous_accel_range'][1],
       params['continuous_steer_range'][1]]), dtype=np.float32)  # acc, steer
-    self.observation_space = spaces.Dict({'birdeye': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
-      'lidar': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
+    observation_space_dict = {
       'camera': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
-      'roadmap': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
-      'vh_clas': spaces.Box(low=0, high=1, shape=(self.pixor_size, self.pixor_size, 1), dtype=np.float32),
-      'vh_regr': spaces.Box(low=-5, high=5, shape=(self.pixor_size, self.pixor_size, 6), dtype=np.float32),
-      'state': spaces.Box(np.array([-2, -1, -5, 0]), np.array([2, 1, 30, 1]), dtype=np.float32),
-      'pixor_state': spaces.Box(np.array([-1000, -1000, -1, -1, -5]), np.array([1000, 1000, 1, 1, 20]), dtype=np.float32)})
+      'lidar': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
+      'birdeye': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
+      'state': spaces.Box(np.array([-2, -1, -5, 0]), np.array([2, 1, 30, 1]), dtype=np.float32)
+      }
+    if self.pixor:
+      observation_space_dict.update({
+        'roadmap': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
+        'vh_clas': spaces.Box(low=0, high=1, shape=(self.pixor_size, self.pixor_size, 1), dtype=np.float32),
+        'vh_regr': spaces.Box(low=-5, high=5, shape=(self.pixor_size, self.pixor_size, 6), dtype=np.float32),
+        'pixor_state': spaces.Box(np.array([-1000, -1000, -1, -1, -5]), np.array([1000, 1000, 1, 1, 20]), dtype=np.float32)
+        })
+    self.observation_space = spaces.Dict(observation_space_dict)
 
     # Connect to carla server and get world object
     print('connecting to Carla server...')
@@ -500,18 +507,19 @@ class CarlaEnv(gym.Env):
     birdeye = self._display_to_rgb(birdeye)
 
     # Roadmap
-    roadmap_render_types = ['roadmap']
-    if self.display_route:
-      roadmap_render_types.append('waypoints')
-    self.birdeye_render.render(self.display, roadmap_render_types)
-    roadmap = pygame.surfarray.array3d(self.display)
-    roadmap = roadmap[0:self.display_size, :, :]
-    roadmap = self._display_to_rgb(roadmap)
-    # Add ego vehicle
-    for i in range(self.obs_size):
-      for j in range(self.obs_size):
-        if abs(birdeye[i, j, 0] - 255)<20 and abs(birdeye[i, j, 1] - 0)<20 and abs(birdeye[i, j, 0] - 255)<20:
-          roadmap[i, j, :] = birdeye[i, j, :]
+    if self.pixor:
+      roadmap_render_types = ['roadmap']
+      if self.display_route:
+        roadmap_render_types.append('waypoints')
+      self.birdeye_render.render(self.display, roadmap_render_types)
+      roadmap = pygame.surfarray.array3d(self.display)
+      roadmap = roadmap[0:self.display_size, :, :]
+      roadmap = self._display_to_rgb(roadmap)
+      # Add ego vehicle
+      for i in range(self.obs_size):
+        for j in range(self.obs_size):
+          if abs(birdeye[i, j, 0] - 255)<20 and abs(birdeye[i, j, 1] - 0)<20 and abs(birdeye[i, j, 0] - 255)<20:
+            roadmap[i, j, :] = birdeye[i, j, :]
 
     # Display birdeye image
     birdeye_surface = self._rgb_to_display_surface(birdeye)
@@ -555,113 +563,14 @@ class CarlaEnv(gym.Env):
     camera_surface = self._rgb_to_display_surface(camera)
     self.display.blit(camera_surface, (self.display_size * 2, 0))
 
-    ## Display roadmap image
-    # roadmap_surface = self._rgb_to_display_surface(roadmap)
-    # self.display.blit(roadmap_surface, (self.display_size * 3, 0))
-
-    ## Vehicle classification and regression maps (requires further normalization)
-    vh_clas = np.zeros((self.pixor_size, self.pixor_size))
-    vh_regr = np.zeros((self.pixor_size, self.pixor_size, 6))
-
-    # Generate the PIXOR image. Note in CARLA it is using left-hand coordinate
-    def get_actor_info(actor):
-      trans=actor.get_transform()
-      x=trans.location.x
-      y=trans.location.y
-      yaw=trans.rotation.yaw/180*np.pi
-      # Get length and width
-      bb=actor.bounding_box
-      l=bb.extent.x  # half the length
-      w=bb.extent.y  # half the width
-      return (x, y, yaw, l, w)
-
-    def global_to_local_pose(pose, ego_pose):
-      x, y, yaw = pose
-      ego_x, ego_y, ego_yaw = ego_pose
-      R = np.array([[np.cos(ego_yaw), np.sin(ego_yaw)], 
-        [-np.sin(ego_yaw), np.cos(ego_yaw)]])
-      vec_local = R.dot(np.array([x - ego_x, y - ego_y]))
-      yaw_local = yaw - ego_yaw
-      return (vec_local[0], vec_local[1], yaw_local)
-
-    def local_to_pixel_info(info):
-      """Here the ego local coordinate is left-handed, the pixel
-      coordinate is also left-handed, with its origin at the left bottom.
-      """
-      x, y, yaw, l, w = info
-      x_pixel = (x + self.d_behind)/self.obs_range*self.pixor_size 
-      y_pixel = y/self.obs_range*self.pixor_size + self.pixor_size/2
-      yaw_pixel = yaw
-      l_pixel = l/self.obs_range*self.pixor_size
-      w_pixel = w/self.obs_range*self.pixor_size
-      return (x_pixel, y_pixel, yaw_pixel, l_pixel, w_pixel)
-
-    def get_pixels_from_info(info):
-      """Get pixels from information in pixel coordinate, 
-      which the origin is at the left bottom.
-      """
-      poly = get_poly_from_info(info)     
-      p = Path(poly) # make a polygon
-      grid = p.contains_points(self.pixel_grid)
-      isinPoly = np.where(grid==True)
-      pixels = np.take(self.pixel_grid, isinPoly, axis=0)[0]
-      return pixels
-
-    def get_poly_from_info(info):
-      x, y, yaw, l, w = info
-      poly_local=np.array([[l,w],[l,-w],[-l,-w],[-l,w]]).transpose()
-      # Get rotation matrix to transform to the coordinate
-      R=np.array([[np.cos(yaw),-np.sin(yaw)],[np.sin(yaw),np.cos(yaw)]])
-      # Get bounding box polygon
-      poly=np.matmul(R,poly_local).transpose()+np.repeat([[x,y]],4,axis=0)
-      return poly
-
-    # Get the 6-dim geom parametrization in PIXOR, here we use pixel coordinate
-    # for convenience
-    ego_trans = self.ego.get_transform()
-    ego_x = ego_trans.location.x
-    ego_y = ego_trans.location.y
-    ego_yaw = ego_trans.rotation.yaw/180*np.pi
-    for actor in self.world.get_actors().filter('vehicle.*'):
-      x, y, yaw, l, w = get_actor_info(actor)
-      x_local, y_local, yaw_local = global_to_local_pose(
-        (x, y, yaw), (ego_x, ego_y, ego_yaw))
-      if actor.id != self.ego.id and np.sqrt(x_local**2 + y_local**2) < self.obs_range**1.5:
-        x_pixel, y_pixel, yaw_pixel, l_pixel, w_pixel = local_to_pixel_info(
-          (x_local, y_local, yaw_local, l, w))
-        cos_t = np.cos(yaw_pixel)
-        sin_t = np.sin(yaw_pixel)
-        logw = np.log(w_pixel)
-        logl = np.log(l_pixel)
-        pixels = get_pixels_from_info((x_pixel, y_pixel, yaw_pixel, l_pixel, w_pixel))
-        for pixel in pixels:
-          vh_clas[pixel[0], pixel[1]] = 1
-          dx = x_pixel - pixel[0]
-          dy = y_pixel - pixel[1]
-          # dx = (x_pixel - pixel[0])/self.obs_size*self.obs_range
-          # dy = (y_pixel - pixel[1])/self.obs_size*self.obs_range
-          vh_regr[pixel[0], pixel[1], :] = np.array(
-            [cos_t, sin_t, dx, dy, logw, logl])
-
-    # Flip the image matrix so that the origin is at the left-bottom
-    vh_clas = np.flip(vh_clas, axis=0)
-    vh_regr = np.flip(vh_regr, axis=0)
-
-    ## Display pixor images
-    # vh_clas_display = np.stack([vh_clas, vh_clas, vh_clas], axis=2) * 255
-    # vh_clas_surface = self._rgb_to_display_surface(vh_clas_display)
-    # self.display.blit(vh_clas_surface, (self.display_size * 4, 0))
-    # vh_regr1 = vh_regr[:, :, 0:3]
-    # vh_regr2 = vh_regr[:, :, 3:6]
-    # vh_regr1_surface = self._rgb_to_display_surface(vh_regr1)
-    # self.display.blit(vh_regr1_surface, (self.display_size * 5, 0))
-    # vh_regr2_surface = self._rgb_to_display_surface(vh_regr2)
-    # self.display.blit(vh_regr2_surface, (self.display_size * 6, 0))
-
     # Display on pygame
     pygame.display.flip()
 
     # State observation
+    ego_trans = self.ego.get_transform()
+    ego_x = ego_trans.location.x
+    ego_y = ego_trans.location.y
+    ego_yaw = ego_trans.rotation.yaw/180*np.pi
     lateral_dis, w = self._get_preview_lane_dis(self.waypoints, ego_x, ego_y)
     delta_yaw = np.arcsin(np.cross(w, 
       np.array(np.array([np.cos(ego_yaw), np.sin(ego_yaw)]))))
@@ -669,21 +578,107 @@ class CarlaEnv(gym.Env):
     speed = np.sqrt(v.x**2 + v.y**2)
     state = np.array([lateral_dis, - delta_yaw, speed, self.vehicle_front])
 
-    # Pixor state, [x, y, cos(yaw), sin(yaw), speed]
-    pixor_state = [ego_x, ego_y, np.cos(ego_yaw), np.sin(ego_yaw), speed]
+    if self.pixor:
+      ## Vehicle classification and regression maps (requires further normalization)
+      vh_clas = np.zeros((self.pixor_size, self.pixor_size))
+      vh_regr = np.zeros((self.pixor_size, self.pixor_size, 6))
 
-    obs = {}
-    obs.update({
-      'birdeye':birdeye.astype(np.uint8),
-      'lidar':lidar.astype(np.uint8),
+      # Generate the PIXOR image. Note in CARLA it is using left-hand coordinate
+      def get_actor_info(actor):
+        trans=actor.get_transform()
+        x=trans.location.x
+        y=trans.location.y
+        yaw=trans.rotation.yaw/180*np.pi
+        # Get length and width
+        bb=actor.bounding_box
+        l=bb.extent.x  # half the length
+        w=bb.extent.y  # half the width
+        return (x, y, yaw, l, w)
+
+      def global_to_local_pose(pose, ego_pose):
+        x, y, yaw = pose
+        ego_x, ego_y, ego_yaw = ego_pose
+        R = np.array([[np.cos(ego_yaw), np.sin(ego_yaw)], 
+          [-np.sin(ego_yaw), np.cos(ego_yaw)]])
+        vec_local = R.dot(np.array([x - ego_x, y - ego_y]))
+        yaw_local = yaw - ego_yaw
+        return (vec_local[0], vec_local[1], yaw_local)
+
+      def local_to_pixel_info(info):
+        """Here the ego local coordinate is left-handed, the pixel
+        coordinate is also left-handed, with its origin at the left bottom.
+        """
+        x, y, yaw, l, w = info
+        x_pixel = (x + self.d_behind)/self.obs_range*self.pixor_size 
+        y_pixel = y/self.obs_range*self.pixor_size + self.pixor_size/2
+        yaw_pixel = yaw
+        l_pixel = l/self.obs_range*self.pixor_size
+        w_pixel = w/self.obs_range*self.pixor_size
+        return (x_pixel, y_pixel, yaw_pixel, l_pixel, w_pixel)
+
+      def get_pixels_from_info(info):
+        """Get pixels from information in pixel coordinate, 
+        which the origin is at the left bottom.
+        """
+        poly = get_poly_from_info(info)     
+        p = Path(poly) # make a polygon
+        grid = p.contains_points(self.pixel_grid)
+        isinPoly = np.where(grid==True)
+        pixels = np.take(self.pixel_grid, isinPoly, axis=0)[0]
+        return pixels
+
+      def get_poly_from_info(info):
+        x, y, yaw, l, w = info
+        poly_local=np.array([[l,w],[l,-w],[-l,-w],[-l,w]]).transpose()
+        # Get rotation matrix to transform to the coordinate
+        R=np.array([[np.cos(yaw),-np.sin(yaw)],[np.sin(yaw),np.cos(yaw)]])
+        # Get bounding box polygon
+        poly=np.matmul(R,poly_local).transpose()+np.repeat([[x,y]],4,axis=0)
+        return poly
+
+      # Get the 6-dim geom parametrization in PIXOR, here we use pixel coordinate
+      # for convenience
+      for actor in self.world.get_actors().filter('vehicle.*'):
+        x, y, yaw, l, w = get_actor_info(actor)
+        x_local, y_local, yaw_local = global_to_local_pose(
+          (x, y, yaw), (ego_x, ego_y, ego_yaw))
+        if actor.id != self.ego.id and np.sqrt(x_local**2 + y_local**2) < self.obs_range**1.5:
+          x_pixel, y_pixel, yaw_pixel, l_pixel, w_pixel = local_to_pixel_info(
+            (x_local, y_local, yaw_local, l, w))
+          cos_t = np.cos(yaw_pixel)
+          sin_t = np.sin(yaw_pixel)
+          logw = np.log(w_pixel)
+          logl = np.log(l_pixel)
+          pixels = get_pixels_from_info((x_pixel, y_pixel, yaw_pixel, l_pixel, w_pixel))
+          for pixel in pixels:
+            vh_clas[pixel[0], pixel[1]] = 1
+            dx = x_pixel - pixel[0]
+            dy = y_pixel - pixel[1]
+            vh_regr[pixel[0], pixel[1], :] = np.array(
+              [cos_t, sin_t, dx, dy, logw, logl])
+
+      # Flip the image matrix so that the origin is at the left-bottom
+      vh_clas = np.flip(vh_clas, axis=0)
+      vh_regr = np.flip(vh_regr, axis=0)
+
+      # Pixor state, [x, y, cos(yaw), sin(yaw), speed]
+      pixor_state = [ego_x, ego_y, np.cos(ego_yaw), np.sin(ego_yaw), speed]
+
+    obs = {
       'camera':camera.astype(np.uint8),
-      'roadmap':roadmap.astype(np.uint8),
-      'vh_clas':np.expand_dims(vh_clas, -1).astype(np.float32),
-      'vh_regr':vh_regr.astype(np.float32),
+      'lidar':lidar.astype(np.uint8),
+      'birdeye':birdeye.astype(np.uint8),
       'state': state,
-      'pixor_state': pixor_state,
-    })
-    
+    }
+
+    if self.pixor:
+      obs.update({
+        'roadmap':roadmap.astype(np.uint8),
+        'vh_clas':np.expand_dims(vh_clas, -1).astype(np.float32),
+        'vh_regr':vh_regr.astype(np.float32),
+        'pixor_state': pixor_state,
+      })
+
     return obs
 
   def _get_reward(self):

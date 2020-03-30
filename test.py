@@ -36,6 +36,7 @@ def main():
     'max_ego_spawn_times': 200,  # maximum times to spawn ego vehicle
     'display_route': True,  # whether to render the desired route
     'pixor_size': 64,  # size of the pixor labels
+    'pixor': False,  # whether to output PIXOR observation
   }
 
   # Set gym-carla environment
