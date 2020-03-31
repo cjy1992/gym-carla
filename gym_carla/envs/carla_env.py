@@ -74,7 +74,7 @@ class CarlaEnv(gym.Env):
       'vh_regr': spaces.Box(low=-5, high=5, shape=(self.pixor_size, self.pixor_size, 6), dtype=np.float32),
       'state': spaces.Box(np.array([-2, -1, -5, 0]), np.array([2, 1, 30, 1]), dtype=np.float32),
       'pixor_state': spaces.Box(np.array([-1000, -1000, -1, -1, -5]), np.array([1000, 1000, 1, 1, 20]), dtype=np.float32),
-      'costmap': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 1), dtype=np.uint8)})
+      'costmap': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 1), dtype=np.uint8)}) #costmap should be a 2d array
 
     # Connect to carla server and get world object
     print('connecting to Carla server...')
@@ -672,70 +672,6 @@ class CarlaEnv(gym.Env):
     # Pixor state, [x, y, cos(yaw), sin(yaw), speed]
     pixor_state = [ego_x, ego_y, np.cos(ego_yaw), np.sin(ego_yaw), speed]
 
-    #waypoints is a python list of [waypoint.transform.location.x (float), waypoint.transform.location.y (float), waypoint.transform.rotation.yaw (float degrees)]
-    # Generates a Costmap for all waypoints
-    def _get_costmap(actualWaypoints, cost):
-      #iterate through all actualwaypoints (not just the carla_env.waypoints because they are not true waypoints)
-      # leftWaypoint = waypoint.get_left_lane
-      # rightWaypoint = waypoint.get_right_lane
-      #set waypoint + neightbor to cost
-      costmap = np.zeros((self.obs_size, self.obs_size))
-
-      for (waypoint, _) in actualWaypoints:
-        laneWidth = waypoint.lane_width
-        x_center = waypoint.transform.location.x
-        y1 = cost
-        x2 = x_center - laneWidth
-        y2 = y3 = 0
-        x3 = x_center + laneWidth
-        y_center = waypoint.transform.location.y
-
-        #centerQuad returns a cost for any x between x2 and x3
-        centerQuad = _get_quadratic(x_center, y1, x2, y2, x3, y3)
-        print("Ego_x: " + str(ego_x) + ", Ego_y: " + str(ego_y))
-        print("X_center: " + str(x_center) + ", y_center" + str(y_center))
-        #for a lane, all y should be the same 
-        local_y = int((self.obs_size // 2) + ((y_center - ego_y) / self.lidar_bin))
-
-
-        for x in np.arange(x2, x3, self.lidar_bin):
-          local_x = int((self.obs_size // 2) + ((x - ego_x) / self.lidar_bin))
-          print("Local X: " + str(local_x) + ", Local Y: " + str(local_y))
-          costmap[local_x, local_y] = centerQuad(x)
-          print(costmap[local_x, local_y]) 
-
-        leftQuad = rightQuad = None
-
-        leftWaypoint = waypoint.get_left_lane()
-        rightWaypoint = waypoint.get_right_lane()
-        
-        #check if left lane exists          
-        if leftWaypoint:
-          x_left = leftWaypoint.transform.location.x
-          x4 = x_left - laneWidth
-          leftQuad = _get_quadratic(x_left, y1, x2, y2, x4, y3)
-
-          for x in np.arange(x4, x2, self.lidar_bin):
-            local_x = int((self.obs_size // 2) + ((x - ego_x) / self.lidar_bin))
-            costmap[local_x, local_y] = centerQuad(x)    
-
-        #check if right lane exists
-        if rightWaypoint:
-          x_right = rightWaypoint.transform.location.x
-          x5 = x_right + laneWidth
-          rightQuad = _get_quadratic(x_right, y1, x3, y2, x5, y3)
-          for x in np.arange(x3, x5, self.lidar_bin):
-            local_x = int((self.obs_size // 2) + ((x - ego_x) / self.lidar_bin))
-            costmap[local_x, local_y] = centerQuad(x) 
-
-
-        #center of the map should be ego_x, ego_y. total height and length of map is self.obs_range, separated by self.lidar_bin
-        #in local coordinates, center is self.obs_size / 2, self.obs_size /2 == global coordinates ego_x, ego_y
-        #(self.obs_size / 2) + x in local coordinates is the same thing as ego_x + x*self.lidar_bin 
-
-        
-      return costmap
-
     #returns a quadratic function given 3 unique points
     def _get_quadratic(x1, y1, x2, y2, x3, y3):
       denom = (x1-x2) * (x1-x3) * (x2-x3);
@@ -746,8 +682,45 @@ class CarlaEnv(gym.Env):
       #we can calculate cost for any x between x2 and x3
       return lambda x: a*(x**2) + b*x + c  
 
+    # Generates a costmap for a single waypoint
+    def _get_costmap(waypoint, cost):
+      costmap = np.zeros((self.obs_size, self.obs_size))
+
+      #these are the points (0,0) of our costmap. everything will be relative to them 
+      corner_x = ego_x - (self.obs_size / 2)
+      corner_y = ego_y - (self.obs_size / 2) 
+
+      #center waypoint
+      laneWidth = waypoint.lane_width
+      x_center = waypoint.transform.location.x
+      y_center = waypoint.transform.location.y
+      quad_center = _get_quadratic(0, cost, laneWidth / 2, 0, -laneWidth / 2, 0) #this quadratic takes in distance from waypoint and outputs a cost
+
+      #now we have to iterate through a circle centered at the waypoint, calculate the cost at each point and put it into the costmap
+      for x in np.arange(x_center - (laneWidth / 2), x_center + (laneWidth / 2), self.lidar_bin):
+        for y in np.arange(y_center - (laneWidth / 2), y_center + (laneWidth / 2), self.lidar_bin):
+          #we have to transform x and y so that they are relative to the corner
+          transformedX = int(x - corner_x)
+          transformedY = int(y - corner_y)
+          if transformedX < self.obs_size and transformedY < self.obs_size:
+            costmap[transformedX][transformedY] = quad_center(np.sqrt(x ** 2 + y ** 2))
+
+      return costmap
+
     cost = -10
-    costmap = _get_costmap(self.routeplanner._actualWaypoints, -10)
+    costmap = np.zeros((self.obs_size, self.obs_size))
+    for waypoint in self.route_planner._actualWaypoints:
+      costmap = np.add(costmap, _get_costmap(waypoint, cost))
+      leftWaypoint = waypoint.get_left_lane
+      rightWaypoint = waypoint.get_right_lane
+
+      if leftWaypoint:
+        costmap = np.add(costmap, _get_costmap(leftWaypoint, cost))
+      if rightWaypoint:
+        costmap = np.add(costmap, _get_costmap(rightWaypoint, cost))
+
+    #costmap is a 2d ndarray that goes from -10 to 0 so we have to scale it from 0 to 255
+    costmap = (costmap + 10) * 255 / 10
     #print("Costmap: " + str(costmap))
 
     # actualWaypointsList = []
@@ -757,6 +730,12 @@ class CarlaEnv(gym.Env):
     # print("Actual Waypoints: " + str(actualWaypointsList))
     # print("Waypoints List: " + str(self.waypoints))
 
+
+    """implementing costmap:
+    Costmap is a 2d array that has costs at each point. The center of the cost map is the location of 
+    the ego vehicle. First work on creating the 2d array. Then create the visual (surface) in pygame.
+    Finally, update the obs dictionary with costmap
+    """
 
     obs = {}
     obs.update({
@@ -768,6 +747,7 @@ class CarlaEnv(gym.Env):
       'vh_regr':vh_regr.astype(np.float32),
       'state': state,
       'pixor_state': pixor_state,
+      'costmap' : costmap
     })
     
     return obs
