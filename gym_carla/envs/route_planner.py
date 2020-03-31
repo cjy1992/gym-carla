@@ -114,7 +114,8 @@ class RoutePlanner():
     for i, (waypoint, _) in enumerate(self._waypoint_buffer):
       waypoints.append([waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
 
-    self._actualWaypoints = self._waypoint_buffer
+    self._actualWaypoints = np.array([i[0] for i in self._waypoint_buffer])
+    #self._actualWaypoints = self._waypoint_buffer
     # current vehicle waypoint
     self._current_waypoint = self._map.get_waypoint(self._vehicle.get_location())
     # target waypoint

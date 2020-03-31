@@ -192,7 +192,11 @@ class CarlaEnv(gym.Env):
         self.reset()
 
       if self.task_mode == 'random':
-        transform = random.choice(self.vehicle_spawn_points)
+        #transform = random.choice(self.vehicle_spawn_points)
+        transform = self.vehicle_spawn_points[0]
+        #transform.rotation.yaw = 0
+        tup = (transform.location.x, transform.location.y, transform.rotation.yaw)
+        print("Transform: " + str(tup))
       if self.task_mode == 'roundabout':
         self.start=[52.1+np.random.uniform(-5,5),-4.2, 178.66] # random
         # self.start=[52.1,-4.2, 178.66] # static
@@ -325,7 +329,7 @@ class CarlaEnv(gym.Env):
     """
     pygame.init()
     self.display = pygame.display.set_mode(
-    (self.display_size * 3, self.display_size),
+    (self.display_size * 4, self.display_size),
     pygame.HWSURFACE | pygame.DOUBLEBUF)
 
     pixels_per_meter = self.display_size / self.obs_range
@@ -684,11 +688,17 @@ class CarlaEnv(gym.Env):
 
     # Generates a costmap for a single waypoint
     def _get_costmap(waypoint, cost):
-      costmap = np.zeros((self.obs_size, self.obs_size))
+      single_costmap = np.zeros((self.obs_size, self.obs_size))
 
-      #these are the points (0,0) of our costmap. everything will be relative to them 
+      # #these are the corner points. we have to first translate to make ego_x, ego_y the origin, rotate, and then translate back
+      # temp_x = -(self.obs_size / 2)
+      # temp_y = -(self.obs_size / 2) 
+
+      # #now we rotate the points by the yaw and translate back
+      # corner_x = (temp_x * np.cos(ego_yaw) - temp_y * np.sin(ego_yaw)) + ego_x
+      # corner_y = (temp_x * np.sin(ego_yaw) + temp_y * np.cos(ego_yaw)) + ego_y
       corner_x = ego_x - (self.obs_size / 2)
-      corner_y = ego_y - (self.obs_size / 2) 
+      corner_y = ego_y - (self.obs_size / 2)
 
       #center waypoint
       laneWidth = waypoint.lane_width
@@ -697,22 +707,39 @@ class CarlaEnv(gym.Env):
       quad_center = _get_quadratic(0, cost, laneWidth / 2, 0, -laneWidth / 2, 0) #this quadratic takes in distance from waypoint and outputs a cost
 
       #now we have to iterate through a circle centered at the waypoint, calculate the cost at each point and put it into the costmap
+      #problem: right now it is a square instead of a circle
       for x in np.arange(x_center - (laneWidth / 2), x_center + (laneWidth / 2), self.lidar_bin):
         for y in np.arange(y_center - (laneWidth / 2), y_center + (laneWidth / 2), self.lidar_bin):
-          #we have to transform x and y so that they are relative to the corner
-          transformedX = int(x - corner_x)
-          transformedY = int(y - corner_y)
-          if transformedX < self.obs_size and transformedY < self.obs_size:
-            costmap[transformedX][transformedY] = quad_center(np.sqrt(x ** 2 + y ** 2))
+          #we rotate x and y in the oppopsite direction to find the relative coordinates of the point to the new corner
+          # rotated_x = ((x - ego_x) * np.cos(-ego_yaw) - (y - ego_y) * np.sin(-ego_yaw)) + ego_x
+          # rotated_y = ((x - ego_x) * np.sin(-ego_yaw) + (y - ego_y) * np.cos(-ego_yaw)) + ego_y
+          rotated_x = ( ((x - ego_x) * np.cos(-ego_yaw)) - ((y - ego_y) * np.sin(-ego_yaw)) ) + ego_x
+          rotated_y = ( ((x - ego_x) * np.sin(-ego_yaw)) + ((y - ego_y) * np.cos(-ego_yaw)) ) + ego_y
 
-      return costmap
+          rotated_x = rotated_x - (2 * (rotated_x - ego_x))
+          #we have to transform x and y so that they are relative to the corner
+          transformedX = rotated_x - corner_x
+          transformedY = rotated_y - corner_y
+
+          if transformedX < self.obs_size and transformedY < self.obs_size:
+            print("Transformed " + str((transformedX, transformedY)))
+            transformedX = int(rotated_x - corner_x)
+            transformedY = int(rotated_y - corner_y)
+            distance = np.sqrt((x - x_center) ** 2 + (y - y_center) ** 2)
+            if distance < laneWidth / 2:
+              single_costmap[transformedX][transformedY] = quad_center(distance)
+              #print("Sample: " + str(single_costmap[transformedX][transformedY]) + " at " + str(transformedX) + ", " + str(transformedY))
+              #print(single_costmap[transformedX][transformedY])
+
+      return single_costmap
 
     cost = -10
     costmap = np.zeros((self.obs_size, self.obs_size))
-    for waypoint in self.route_planner._actualWaypoints:
+
+    for waypoint in self.routeplanner._actualWaypoints:
       costmap = np.add(costmap, _get_costmap(waypoint, cost))
-      leftWaypoint = waypoint.get_left_lane
-      rightWaypoint = waypoint.get_right_lane
+      leftWaypoint = waypoint.get_left_lane()
+      rightWaypoint = waypoint.get_right_lane()
 
       if leftWaypoint:
         costmap = np.add(costmap, _get_costmap(leftWaypoint, cost))
@@ -720,8 +747,14 @@ class CarlaEnv(gym.Env):
         costmap = np.add(costmap, _get_costmap(rightWaypoint, cost))
 
     #costmap is a 2d ndarray that goes from -10 to 0 so we have to scale it from 0 to 255
+    costmap = np.clip(costmap, -10, 0)
     costmap = (costmap + 10) * 255 / 10
     #print("Costmap: " + str(costmap))
+    # Display costmap
+    costmap_surface = self._rgb_to_display_surface(np.moveaxis(np.array([costmap, costmap, costmap]), 0, -1))
+    self.display.blit(costmap_surface, (self.display_size * 3, 0))
+
+    print("ego x: " + str(ego_x) + ", ego y: " + str(ego_y))
 
     # actualWaypointsList = []
     # for (waypoint, _) in self.routeplanner._actualWaypoints:
