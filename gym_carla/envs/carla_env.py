@@ -697,8 +697,8 @@ class CarlaEnv(gym.Env):
       # #now we rotate the points by the yaw and translate back
       # corner_x = (temp_x * np.cos(ego_yaw) - temp_y * np.sin(ego_yaw)) + ego_x
       # corner_y = (temp_x * np.sin(ego_yaw) + temp_y * np.cos(ego_yaw)) + ego_y
-      corner_x = ego_x - (self.obs_size / 2)
-      corner_y = ego_y - (self.obs_size / 2)
+      corner_x = ego_x - (self.obs_range / 2)
+      corner_y = ego_y - (self.obs_range / 2)
 
       #center waypoint
       laneWidth = waypoint.lane_width
@@ -721,10 +721,10 @@ class CarlaEnv(gym.Env):
           transformedX = rotated_x - corner_x
           transformedY = rotated_y - corner_y
 
-          if transformedX < self.obs_size and transformedY < self.obs_size:
+          if transformedX < self.obs_range and transformedX >= 0 and transformedY < self.obs_range and transformedY >= 0:
             print("Transformed " + str((transformedX, transformedY)))
-            transformedX = int(rotated_x - corner_x)
-            transformedY = int(rotated_y - corner_y)
+            transformedX = int((rotated_x - corner_x) / self.lidar_bin)
+            transformedY = int((rotated_y - corner_y) / self.lidar_bin)
             distance = np.sqrt((x - x_center) ** 2 + (y - y_center) ** 2)
             if distance < laneWidth / 2:
               single_costmap[transformedX][transformedY] = quad_center(distance)
