@@ -676,6 +676,13 @@ class CarlaEnv(gym.Env):
     # Pixor state, [x, y, cos(yaw), sin(yaw), speed]
     pixor_state = [ego_x, ego_y, np.cos(ego_yaw), np.sin(ego_yaw), speed]
 
+
+    """TODO:
+    1. Make costmap such that it reflects the pictures 
+    2. Figure out why some lanes are shown in the cost map even though they have no waypoint there
+    3. Vectorize 
+    """
+
     #returns a quadratic function given 3 unique points
     def _get_quadratic(x1, y1, x2, y2, x3, y3):
       denom = (x1-x2) * (x1-x3) * (x2-x3);
@@ -733,22 +740,24 @@ class CarlaEnv(gym.Env):
 
       return single_costmap
 
-    cost = -10
+    cost = -50
     costmap = np.zeros((self.obs_size, self.obs_size))
 
+    prevWaypoint = None
     for waypoint in self.routeplanner._actualWaypoints:
       costmap = np.add(costmap, _get_costmap(waypoint, cost))
       leftWaypoint = waypoint.get_left_lane()
       rightWaypoint = waypoint.get_right_lane()
-
+      #check if there actually are waypoints 
       if leftWaypoint:
         costmap = np.add(costmap, _get_costmap(leftWaypoint, cost))
       if rightWaypoint:
         costmap = np.add(costmap, _get_costmap(rightWaypoint, cost))
 
-    #costmap is a 2d ndarray that goes from -10 to 0 so we have to scale it from 0 to 255
-    costmap = np.clip(costmap, -10, 0)
-    costmap = (costmap + 10) * 255 / 10
+
+    #costmap is a 2d ndarray that goes from cost to 0 so we have to scale it from 0 to 255
+    costmap = np.clip(costmap, cost, 0)
+    costmap = (costmap - cost) * 255 / abs(cost)
     #print("Costmap: " + str(costmap))
     # Display costmap
     costmap_surface = self._rgb_to_display_surface(np.moveaxis(np.array([costmap, costmap, costmap]), 0, -1))
