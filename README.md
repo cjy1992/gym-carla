@@ -48,7 +48,7 @@ See details of ```test.py``` about how to use the CARLA gym wrapper.
 ## Description
 1.  We provide a dictionary observation including front view camera (obs['camera']), birdeye view lidar point cloud (obs['lidar']) and birdeye view semantic representation (obs['birdeye']):
 <div align="center">
-  <img src="obs.png" width=75%>
+  <img src="figures/obs.png" width=75%>
 </div>
 We also provide a state vector observation (obs['state']) which is composed of lateral distance and heading error between the ego vehicle to the target lane center line (in meter and rad), ego vehicle's speed (in meters per second), and and indicator of whether there is a front vehicle within a safety margin.
 
@@ -60,7 +60,7 @@ We also provide a state vector observation (obs['state']) which is composed of l
 ### Deep Reinforcement Learning for Autonomous Driving
 - See [https://github.com/cjy1992/interp-e2e-driving](https://github.com/cjy1992/interp-e2e-driving), which provides implementations for the paper [Interpretable End-to-end Urban Autonomous Driving with Latent Deep Reinforcement Learning](https://arxiv.org/abs/2001.08726) and paper [Model-free Deep Reinforcement Learning for Urban Autonomous Driving](https://ieeexplore.ieee.org/abstract/document/8917306), as well as several deep RL baselines for autonomous driving on CARLA.
 <div align="center">
-  <img src="figures/DRL.gif" width=50%>
+  <img src="figures/DRL.gif" width=40%>
 </div>
 
 ### Deep Imitation Learning for Autonomous Driving
@@ -72,7 +72,7 @@ We also provide a state vector observation (obs['state']) which is composed of l
 ### Autonomous Driving Perception and Representation Learning
 - See [https://github.com/cjy1992/detect-loc-map](https://github.com/cjy1992/detect-loc-map), which provides implementations for the paper [End-to-end Autonomous Driving Perception with Sequential Latent Representation Learning](https://arxiv.org/abs/2003.12464).
 <div align="center">
-  <img src="figures/perception.gif" width=75%>
+  <img src="figures/perception.gif" width=60%>
 </div>
 
 
