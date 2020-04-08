@@ -66,12 +66,12 @@ We also provide a state vector observation (obs['state']) which is composed of l
 ### Deep Imitation Learning for Autonomous Driving
 - See paper [Deep Imitation Learning for Autonomous Driving in Generic Urban Scenarios with Enhanced Safety](https://arxiv.org/abs/1903.00640).
 <div align="center">
-  <img src="DIL.gif" width=50%>
+  <img src="figures/DIL.gif" width=50%>
 </div>
 
 ### Autonomous Driving Perception and Representation Learning
 - See [https://github.com/cjy1992/detect-loc-map](https://github.com/cjy1992/detect-loc-map), which provides implementations for the paper [End-to-end Autonomous Driving Perception with Sequential Latent Representation Learning](https://arxiv.org/abs/2003.12464).
-<div align="figures/center">
+<div align="center">
   <img src="figures/perception.gif" width=75%>
 </div>
 
