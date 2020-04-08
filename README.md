@@ -66,7 +66,8 @@ We also provide a state vector observation (obs['state']) which is composed of l
 ### Deep Imitation Learning for Autonomous Driving
 - See paper [Deep Imitation Learning for Autonomous Driving in Generic Urban Scenarios with Enhanced Safety](https://arxiv.org/abs/1903.00640).
 <div align="center">
-  <img src="figures/DIL.gif" width=50%>
+  <img src="figures/roundabout.gif" width=25%>
+  <img src="figures/town.gif" width=25%>
 </div>
 
 ### Autonomous Driving Perception and Representation Learning
