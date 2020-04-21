@@ -677,14 +677,6 @@ class CarlaEnv(gym.Env):
     pixor_state = [ego_x, ego_y, np.cos(ego_yaw), np.sin(ego_yaw), speed]
 
 
-    """TODO:
-    1. Make costmap such that it reflects the pictures 
-    2. Figure out why some lanes are shown in the cost map even though they have no waypoint there
-    3. Vectorize 
-    """
-
-    #given two points (x1, y1), (x2, y2) and point (x3, y3) finds perpindicular distance between point and the line between two points.
-    #VERIFY THAT THIS WORKS   
     def _get_perp_dis(x1, y1, x2, y2, x3, y3):
       x = np.array([x3, y3])
       p = np.array([x1, y1])
@@ -693,157 +685,101 @@ class CarlaEnv(gym.Env):
       lamb = np.dot((x - p), (q - p)) / np.dot((q - p), (q - p))
       if lamb <= 1 and lamb >= 0:
         s = p + (lamb * (q - p))
-      elif lamb < 0:
-        s = p
-      else:
-        s = q  
-      return np.linalg.norm(x - s)#abs( ((y2 - y1) * x3) - ((x2 - x1) * y3) + (x2 * y1) - (y2 * x1)) / np.sqrt((y2 - y1) **2 + (x2 - x1) ** 2)
+        return np.linalg.norm(x - s)#abs( ((y2 - y1) * x3) - ((x2 - x1) * y3) + (x2 * y1) - (y2 * x1)) / np.sqrt((y2 - y1) **2 + (x2 - x1) ** 2)
+      return float('inf')
 
+    """_get_costmap generates a costmap for a current waypoint and its preceding waypoint.
+    I refer a lot to global vs local frame. Global means the xy coordinate in the Carla coordinates
+    Local is the coordinate in the costmap matrix.
+    Also the letters x and y are swapped when referring to the local frame. I have to fix this later because
+    it's confusing to read but it works """
 
+    def _get_costmap(pWaypoint, cWaypoint, cost):
+      single_costmap = np.zeros((self.obs_size, self.obs_size))
 
-
-    # Generates a costmap for a single waypoint
-    def _get_costmap(pWaypoint, cWaypoint, cost, costmap):
-      single_costmap = costmap 
-      #single_costmap = np.zeros((self.obs_size, self.obs_size))
-
-      # #these are the corner points. we have to first translate to make ego_x, ego_y the origin, rotate, and then translate back
-      # temp_x = -(self.obs_size / 2)
-      # temp_y = -(self.obs_size / 2) 
-
-      # #now we rotate the points by the yaw and translate back
-      # corner_x = (temp_x * np.cos(ego_yaw) - temp_y * np.sin(ego_yaw)) + ego_x
-      # corner_y = (temp_x * np.sin(ego_yaw) + temp_y * np.cos(ego_yaw)) + ego_y
-      corner_x = ego_x - (self.obs_range / 2)
-      corner_y = ego_y - (self.obs_range / 2)
-
-      #center waypoint
+      #Definitions for the waypoints' x and y coordinates in the global frame 
       laneWidth = pWaypoint.lane_width
       cX = cWaypoint.transform.location.x
       cY = cWaypoint.transform.location.y
       pX = pWaypoint.transform.location.x
       pY = pWaypoint.transform.location.y
 
-      x_center = (cX + pX) / 2
-      y_center = (cY + pY) / 2
-      print("Current Waypoint: " + str(cX) + ", " + str(cY))
-      print("Prev Waypoint: " + str(pX) + ", " + str(pY))
-      print("Midpoint: " + str(x_center) + ", " + str(y_center))
-      radius = np.sqrt((x_center - cX) ** 2 + (y_center - cY) **2)
-      #now we have to iterate through the midpoint of the line between the two waypoints.
-      #the radius of our iteration is the distance between the center and one waypoint
+      #If we draw a square around the center of the ego vehicle (length is determined by range), this is the bottom left corner in global coords
+      corner_x = ego_x - (self.obs_range / 2)
+      corner_y = ego_y - (self.obs_range / 2)
 
+      #Here we create two matrices with the same dimensions as the costmap. One represents the x coordinate and one represents the y coordinate in the local frame.
+      y_array, x_array = np.meshgrid(np.arange(0, self.obs_size), np.arange(0, self.obs_size))
+      #y_array is [[0 1 2 ... 255] [0 1 2 ... 255] ...] 
+      #x_array is [[0 0 0 .... 0] [1 1 1 .... 1]... [255 255 ... 255]]
 
-      #to vectorize, we have a costmap. we need to calculate the price of 
+      rotated_x_array = (2 * ego_x) - ((x_array * self.lidar_bin) + corner_x)
+      rotated_y_array = (y_array * self.lidar_bin) + corner_y
+      c = np.cos(ego_yaw)
+      s = np.sin(ego_yaw)
+      global_x_array = (c * (rotated_x_array - ego_x)) - (s * (rotated_y_array - ego_y)) + ego_x #for each point in our matrix, we have their global coordinates 
+      global_y_array = (s * (rotated_x_array - ego_x)) + (c * (rotated_y_array - ego_y)) + ego_y
 
+      p = np.array([pX, pY])
+      q = np.array([cX, cY])
+      q_dif = q - p
+      lamb_array= (((global_x_array - pX) * (cX - pX)) + ((global_y_array - pY) * (cY - pY ))) / np.dot((q_dif), (q_dif))
+      sX = pX + (lamb_array * (cX - pX))
+      sY = pY + (lamb_array * (cY - pY))
 
-      # x = np.arange(x_center - (laneWidth / 2), x_center + (laneWidth / 2), self.lidar_bin)
-      # y = np.arange(y_center - (laneWidth / 2), y_center + (laneWidth / 2), self.lidar_bin)
-      # X,Y = np.meshgrid(x,y)
-      # XY=np.array([X.flatten(),Y.flatten()]).T #XY = [[pair1], [pair2] ....] https://stackoverflow.com/questions/32208359/is-there-a-multi-dimensional-version-of-arange-linspace-in-numpy
-      # perpDis = lambda points: abs( ((pY - cY) * abs[0]) - ((pX - cX) * abs[1]) + (pX * cY) - (pY * cX)) / np.sqrt((pY - cY) **2 + (pX - cX) ** 2)
-      # #now we have points that are pairs
-      # rotated_XY = np.zeros(XY.shape)
-      # rotated_XY[:, 0] = ( ((XY[:, 0] - ego_x) * np.cos(-ego_yaw)) - ((XY[:, 1] - ego_y) * np.sin(-ego_yaw)) ) + ego_x
-      # rotated_XY[:, 1] = ( ((XY[:, 0] - ego_x) * np.sin(-ego_yaw)) + ((XY[:, 1] - ego_y) * np.cos(-ego_yaw)) ) + ego_y
-      # rotated_XY[:, 0] = rotated_XY[:, 0] - (2 * (rotated_XY[:, 0] - ego_x))
-
-
-
-              # price = (perpDistance * (abs(cost) / (laneWidth / 2))) + cost
-              # print("Transformed Cost: " + str(price))
-              # single_costmap[transformedX][transformedY] += price
-      for x in np.arange(x_center - radius, x_center + radius, self.lidar_bin):
-        for y in np.arange(y_center - radius, y_center + radius, self.lidar_bin):
-          # #check if point is within the current lane.
-          # if (x,y) IS NOT IN CURRENT LANE:
-          #   continue
-
-
-          perpDistance = _get_perp_dis(pX, pY, cX, cY, x, y)
-          #if the perpDistance (distance between the line between two waypoints) is smaller than half the lane width then the point is a good point
-          if perpDistance > laneWidth / 2:
-            continue
-          #we rotate x and y in the oppopsite direction to find the relative coordinates of the point to the new corner
-          # rotated_x = ((x - ego_x) * np.cos(-ego_yaw) - (y - ego_y) * np.sin(-ego_yaw)) + ego_x
-          # rotated_y = ((x - ego_x) * np.sin(-ego_yaw) + (y - ego_y) * np.cos(-ego_yaw)) + ego_y
-          rotated_x = ( ((x - ego_x) * np.cos(-ego_yaw)) - ((y - ego_y) * np.sin(-ego_yaw)) ) + ego_x
-          rotated_y = ( ((x - ego_x) * np.sin(-ego_yaw)) + ((y - ego_y) * np.cos(-ego_yaw)) ) + ego_y
-
-          rotated_x = rotated_x - (2 * (rotated_x - ego_x))
-          #we have to transform x and y so that they are relative to the corner
-          transformedX = rotated_x - corner_x
-          transformedY = rotated_y - corner_y
-
-          if transformedX < self.obs_range and transformedX >= 0 and transformedY < self.obs_range and transformedY >= 0:
-            #print("Transformed " + str((transformedX, transformedY)))
-            transformedX = int((rotated_x - corner_x) / self.lidar_bin)
-            transformedY = int((rotated_y - corner_y) / self.lidar_bin)
-
-            #normalize the perpDistance so that it is between cost and 0
-            price = (perpDistance * (abs(cost) / (laneWidth / 2))) + cost
-            single_costmap[transformedX][transformedY] += price
-            #print("Sample: " + str(single_costmap[transformedX][transformedY]) + " at " + str(transformedX) + ", " + str(transformedY))
-            #print(single_costmap[transformedX][transformedY])
+      takeNormX = global_x_array - sX
+      takeNormY = global_y_array - sY
+      distanceMap = np.sqrt(np.square(takeNormX) + np.square(takeNormY))
+      penal = (laneWidth / 2) * (-cost) / abs(cost)      
+      perpDis = np.where((lamb_array <=1) & (lamb_array >= 0) & (distanceMap <= laneWidth / 2), distanceMap, penal) #will have perpDistance in the spot if its within the lane
+      single_costmap = perpDis * (abs(cost / (laneWidth / 2))) + cost
 
       return single_costmap
 
 
+    """
+    Explanation of how my costmap implementation works:
+      First we get a list of all of the waypoints from the current position. We iterate through this list in pairs so that there is a current 
+      waypoint and a previous waypoint. These along with parameter cost are passed into _get_costmap which returns a costmap only relevant to the
+      lane defined by the line between the two points. This costmap is summed with the global costmap. This profess is repeated for the left and right
+      lanes of the current waypoint if they exist and are in the same direction.  
+    """
+
     cost = -10
     costmap = np.zeros((self.obs_size, self.obs_size))
-    merge = 0.3 #when a lane merges with another lane, this constant determines how much it affects the entire cost map
     if len(self.routeplanner._actualWaypoints) < 1:
       print("Not enough waypoints to form costmap")
       costmap = None
+
     else:
       pWaypoint = self.routeplanner._actualWaypoints[0]
       for cWaypoint in self.routeplanner._actualWaypoints[1:]:
 
         currentDirection = cWaypoint.lane_id #positive or negative integer depending on which direction the lane is going in 
-        costmap = _get_costmap(pWaypoint, cWaypoint, cost, costmap)
+        costmap = costmap + _get_costmap(pWaypoint, cWaypoint, cost)
+
+        #The current implementation of left and right lanes is contingent on whether the current lane has a left/right lane AND the previous lane has a left/right lane
         pleftWaypoint = pWaypoint.get_left_lane()
         prightWaypoint = pWaypoint.get_right_lane()
         cleftWaypoint = cWaypoint.get_left_lane()
         crightWaypoint = cWaypoint.get_right_lane()
         pWaypoint = cWaypoint
-        #check if there actually are neighbor waypoints 
-        if pleftWaypoint and (pleftWaypoint.lane_id * currentDirection >= 0):
-          if cleftWaypoint:
-            costmap = _get_costmap(pleftWaypoint, cleftWaypoint, cost, costmap)
-          else:
-            costmap = _get_costmap(pleftWaypoint, cWaypoint, merge * cost, costmap)
-          #check if left waypoint has a left lane also
+
+        if pleftWaypoint and (pleftWaypoint.lane_id * currentDirection >= 0): #check if left waypoint exists for the previous waypoint and it goes in the same direction 
+          if cleftWaypoint and (cleftWaypoint.lane_id * currentDirection >= 0): #check if the left waypoint exists for the current waypoint and it goes in the same direction
+            costmap = costmap + _get_costmap(pleftWaypoint, cleftWaypoint, cost)
+
         if prightWaypoint and (prightWaypoint.lane_id * currentDirection >= 0):
-          if crightWaypoint:
-            costmap = _get_costmap(prightWaypoint, crightWaypoint, cost, costmap)
-          else:
-            costmap = _get_costmap(prightWaypoint, cWaypoint, merge * cost, costmap)
-          #check if right waypoint has a right lane also 
+          if crightWaypoint and (crightWaypoint.lane_id * currentDirection >= 0):
+            costmap = costmap + _get_costmap(prightWaypoint, crightWaypoint, cost)
 
 
-    #costmap is a 2d ndarray that goes from cost to 0 so we have to scale it from 0 to 255
+    #Here we convert the cost map which ranges from -cost to 0 (low cost to high cost) to a displayable costmap that has values from 0 to 255
     costmap = np.clip(costmap, cost, 0)
     costmap = (costmap - cost) * 255 / abs(cost)
-    #print("Costmap: " + str(costmap))
-    # Display costmap
+
     costmap_surface = self._rgb_to_display_surface(np.moveaxis(np.array([costmap, costmap, costmap]), 0, -1))
     self.display.blit(costmap_surface, (self.display_size * 3, 0))
-
-    print("ego x: " + str(ego_x) + ", ego y: " + str(ego_y) + ", ego yaw: " + str(ego_yaw))
-
-    # actualWaypointsList = []
-    # for (waypoint, _) in self.routeplanner._actualWaypoints:
-    #   tup = (waypoint.transform.location.x, waypoint.transform.location.y)
-    #   actualWaypointsList.append(tup)
-    # print("Actual Waypoints: " + str(actualWaypointsList))
-    # print("Waypoints List: " + str(self.waypoints))
-
-
-    """implementing costmap:
-    Costmap is a 2d array that has costs at each point. The center of the cost map is the location of 
-    the ego vehicle. First work on creating the 2d array. Then create the visual (surface) in pygame.
-    Finally, update the obs dictionary with costmap
-    """
 
     obs = {}
     obs.update({
