@@ -745,58 +745,66 @@ class CarlaEnv(gym.Env):
 
 
     #Generate list of waypoints. Previously, we relied on self.routeplanner._actualWaypoints
+    #there is way to save space for this. Instead of recalculating all waypoints, we can reuse most of them.
 
+    #we can do this for each neighboring lane 
+    waypoint_to_sample = [self.world.get_map().get_waypoint(self.ego.get_location())]
+    if waypoint_to_sample[0].get_left_lane():
+      waypoint_to_sample.append(waypoint_to_sample[0].get_left_lane())
+    if waypoint_to_sample[0].get_right_lane():
+      waypoint_to_sample.append(waypoint_to_sample[0].get_right_lane())
     directionsList = []
-    current_waypoint = self.world.get_map().get_waypoint(self.ego.get_location())
-    sampling_radius = 5
-    #currentWaypoints = current_waypoint.next_until_lane_end(sampling_radius)
-    current_waypoints = [current_waypoint]
-    lane_end = False
-    ctr = 0
+    for current_waypoint in waypoint_to_sample:
+      #current_waypoint = self.world.get_map().get_waypoint(self.ego.get_location())
+      sampling_radius = 5
+      #currentWaypoints = current_waypoint.next_until_lane_end(sampling_radius)
+      current_waypoints = [current_waypoint]
+      lane_end = False
+      ctr = 0
 
-    while (not lane_end) and ctr < 10:
-      sample_waypoint = current_waypoints[-1]
-      ctr += 1
-      next_waypoint = sample_waypoint.next(sampling_radius)
+      while (not lane_end) and ctr < 10:
+        sample_waypoint = current_waypoints[-1]
+        ctr += 1
+        next_waypoint = sample_waypoint.next(sampling_radius)
 
-      if (sample_waypoint.is_junction):
-        print('JUNCTIONTIOENASTIONI')
+        if (sample_waypoint.is_junction):
+          print('JUNCTIONTIOENASTIONI')
 
 
-      if (len(next_waypoint) > 1):
-        lane_end = True
-        print("Testing if the last means in junction", sample_waypoint.is_junction)
-      else: 
-        current_waypoints.append(next_waypoint[0])
+        if (len(next_waypoint) != 1):
+          lane_end = True
+          print("Testing if the last means in junction", sample_waypoint.is_junction)
+        else: 
+          current_waypoints.append(next_waypoint[0])
 
-    print("length of currentWaypoints", len(current_waypoints))
-    last_waypoint = current_waypoints[-1]
+      print("length of currentWaypoints", len(current_waypoints))
+      last_waypoint = current_waypoints[-1]
 
-    directionsList.append(current_waypoints)
+      directionsList.append(current_waypoints)
 
-    dist = last_waypoint.transform.location.distance(self.ego.get_location())
-    #check if last waypoint is within range of the vehicle
+      dist = last_waypoint.transform.location.distance(self.ego.get_location())
+      #check if last waypoint is within range of the vehicle
 
-    if lane_end:
-      #this means the lane changes direction so we have to compute the new lanes for the junction
-      print("last waypoint coming up")
-      next_waypoints = last_waypoint.next(sampling_radius)
-      print(next_waypoints)
-      for new_direction in next_waypoints: #we append some points
-        new_waypoints = [current_waypoint, new_direction]
-        ctr = 0
-        lane_end = False
-        while (not lane_end) and ctr < 5:
-          ctr += 1
-          sample_waypoint = new_waypoints[-1]
+      if lane_end:
+        #this means the lane changes direction so we have to compute the new lanes for the junction
+        print("last waypoint coming up")
+        next_waypoints = last_waypoint.next(sampling_radius)
+        print(next_waypoints)
+        for new_direction in next_waypoints: #we append some points
+          new_waypoints = [current_waypoint, new_direction]
+          ctr = 0
+          lane_end = False
+          while (not lane_end) and ctr < 5:
+            ctr += 1
+            sample_waypoint = new_waypoints[-1]
 
-          next_waypoint = sample_waypoint.next(sampling_radius)
-          if (len(next_waypoint) > 1):
-            lane_end = True
-          else: 
-            new_waypoints.append(next_waypoint[0])
-        print("new_waypoints", new_waypoints)
-        directionsList.append(new_waypoints)
+            next_waypoint = sample_waypoint.next(sampling_radius)
+            if (len(next_waypoint) > 1):
+              lane_end = True
+            else: 
+              new_waypoints.append(next_waypoint[0])
+          print("new_waypoints", new_waypoints)
+          directionsList.append(new_waypoints)
 
 
     #listofWaypoints = self.routeplanner._actualWaypoints
