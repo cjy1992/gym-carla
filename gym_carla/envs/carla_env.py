@@ -21,10 +21,8 @@ import gym
 from gym import spaces
 from gym.utils import seeding
 import carla
-
 from gym_carla.envs.render import BirdeyeRender
 from gym_carla.envs.route_planner import RoutePlanner
-
 
 class CarlaEnv(gym.Env):
   """An OpenAI gym wrapper for CARLA simulator."""
@@ -727,12 +725,10 @@ class CarlaEnv(gym.Env):
       sX = pX + (lamb_array * (cX - pX))
       sY = pY + (lamb_array * (cY - pY))
 
-      takeNormX = global_x_array - sX
-      takeNormY = global_y_array - sY
-      distanceMap = np.sqrt(np.square(takeNormX) + np.square(takeNormY))
+      distanceMap = np.sqrt(np.square(global_x_array - sX) + np.square(global_y_array - sY))
       penal = (laneWidth / 2) * (-cost) / abs(cost)      
-      perpDis = np.where((lamb_array <=1) & (lamb_array >= 0) & (distanceMap <= laneWidth / 2), distanceMap, penal) #will have perpDistance in the spot if its within the lane
-      single_costmap = perpDis * (abs(cost / (laneWidth / 2))) + cost
+      distanceMap = np.where((lamb_array <=1) & (lamb_array >= 0) & (distanceMap <= laneWidth / 2), distanceMap, penal) #will have perpDistance in the spot if its within the lane
+      single_costmap = distanceMap * (abs(cost / (laneWidth / 2))) + cost
 
       return single_costmap
 
@@ -745,33 +741,98 @@ class CarlaEnv(gym.Env):
       lanes of the current waypoint if they exist and are in the same direction.  
     """
 
+
+
+
+    #Generate list of waypoints. Previously, we relied on self.routeplanner._actualWaypoints
+
+    directionsList = []
+    current_waypoint = self.world.get_map().get_waypoint(self.ego.get_location())
+    sampling_radius = 5
+    #currentWaypoints = current_waypoint.next_until_lane_end(sampling_radius)
+    current_waypoints = [current_waypoint]
+    lane_end = False
+    ctr = 0
+
+    while (not lane_end) and ctr < 10:
+      sample_waypoint = current_waypoints[-1]
+      ctr += 1
+      next_waypoint = sample_waypoint.next(sampling_radius)
+
+      if (sample_waypoint.is_junction):
+        print('JUNCTIONTIOENASTIONI')
+
+
+      if (len(next_waypoint) > 1):
+        lane_end = True
+        print("Testing if the last means in junction", sample_waypoint.is_junction)
+      else: 
+        current_waypoints.append(next_waypoint[0])
+
+    print("length of currentWaypoints", len(current_waypoints))
+    last_waypoint = current_waypoints[-1]
+
+    directionsList.append(current_waypoints)
+
+    dist = last_waypoint.transform.location.distance(self.ego.get_location())
+    #check if last waypoint is within range of the vehicle
+
+    if lane_end:
+      #this means the lane changes direction so we have to compute the new lanes for the junction
+      print("last waypoint coming up")
+      next_waypoints = last_waypoint.next(sampling_radius)
+      print(next_waypoints)
+      for new_direction in next_waypoints: #we append some points
+        new_waypoints = [current_waypoint, new_direction]
+        ctr = 0
+        lane_end = False
+        while (not lane_end) and ctr < 5:
+          ctr += 1
+          sample_waypoint = new_waypoints[-1]
+
+          next_waypoint = sample_waypoint.next(sampling_radius)
+          if (len(next_waypoint) > 1):
+            lane_end = True
+          else: 
+            new_waypoints.append(next_waypoint[0])
+        print("new_waypoints", new_waypoints)
+        directionsList.append(new_waypoints)
+
+
+    #listofWaypoints = self.routeplanner._actualWaypoints
+
+    #currently working on finding all future lanes for one waypoint. I think the best way to do this is through DFS
     cost = -10
     costmap = np.zeros((self.obs_size, self.obs_size))
-    if len(self.routeplanner._actualWaypoints) < 1:
-      print("Not enough waypoints to form costmap")
-      costmap = None
 
-    else:
-      pWaypoint = self.routeplanner._actualWaypoints[0]
-      for cWaypoint in self.routeplanner._actualWaypoints[1:]:
+    for listofWaypoints in directionsList:
+      if len(listofWaypoints) < 1:
+        print("Not enough waypoints to form costmap")
 
-        currentDirection = cWaypoint.lane_id #positive or negative integer depending on which direction the lane is going in 
-        costmap = costmap + _get_costmap(pWaypoint, cWaypoint, cost)
+      else:
+        pWaypoint = listofWaypoints[0]
+        for cWaypoint in listofWaypoints[1:]:
 
-        #The current implementation of left and right lanes is contingent on whether the current lane has a left/right lane AND the previous lane has a left/right lane
-        pleftWaypoint = pWaypoint.get_left_lane()
-        prightWaypoint = pWaypoint.get_right_lane()
-        cleftWaypoint = cWaypoint.get_left_lane()
-        crightWaypoint = cWaypoint.get_right_lane()
-        pWaypoint = cWaypoint
+          currentDirection = cWaypoint.lane_id #positive or negative integer depending on which direction the lane is going in 
+          costmap = costmap + _get_costmap(pWaypoint, cWaypoint, cost)
 
-        if pleftWaypoint and (pleftWaypoint.lane_id * currentDirection >= 0): #check if left waypoint exists for the previous waypoint and it goes in the same direction 
-          if cleftWaypoint and (cleftWaypoint.lane_id * currentDirection >= 0): #check if the left waypoint exists for the current waypoint and it goes in the same direction
-            costmap = costmap + _get_costmap(pleftWaypoint, cleftWaypoint, cost)
+          #The current implementation of left and right lanes is contingent on whether the current lane has a left/right lane AND the previous lane has a left/right lane
+          pleftWaypoint = pWaypoint.get_left_lane()
+          prightWaypoint = pWaypoint.get_right_lane()
+          cleftWaypoint = cWaypoint.get_left_lane()
+          crightWaypoint = cWaypoint.get_right_lane()
+          pWaypoint = cWaypoint
 
-        if prightWaypoint and (prightWaypoint.lane_id * currentDirection >= 0):
-          if crightWaypoint and (crightWaypoint.lane_id * currentDirection >= 0):
-            costmap = costmap + _get_costmap(prightWaypoint, crightWaypoint, cost)
+
+
+
+        # if pleftWaypoint and (pleftWaypoint.lane_id * currentDirection >= 0): #check if left waypoint exists for the previous waypoint and it goes in the same direction 
+        #   if cleftWaypoint and (cleftWaypoint.lane_id * currentDirection >= 0): #check if the left waypoint exists for the current waypoint and it goes in the same direction
+        #     costmap = costmap + _get_costmap(pleftWaypoint, cleftWaypoint, cost)
+
+        # if prightWaypoint and (prightWaypoint.lane_id * currentDirection >= 0):
+        #   if crightWaypoint and (crightWaypoint.lane_id * currentDirection >= 0):
+        #     costmap = costmap + _get_costmap(prightWaypoint, crightWaypoint, cost)
 
 
     #Here we convert the cost map which ranges from -cost to 0 (low cost to high cost) to a displayable costmap that has values from 0 to 255
