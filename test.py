@@ -39,15 +39,17 @@ def main():
 	}
 
 	# Set gym-carla environment
-	env = gym.make('carla-v0', params=params)
+	env = gym.make('carla-v0')
 	obs = env.reset()
+	rew = []
 
 	while True:
-		action = [1.0, 0.0]
+		action = [0.2, 0.0]
 		obs,r,done,info = env.step(action)
-
+		rew.append(r)
 		if done:
 			obs = env.reset()
+			rew = []
 
 
 if __name__ == '__main__':

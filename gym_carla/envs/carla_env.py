@@ -23,6 +23,7 @@ import carla
 from gym_carla.envs.render import BirdeyeRender
 from gym_carla.envs.route_planner import RoutePlanner
 
+from graph_nets import utils_np
 
 class CarlaEnv(gym.Env):
     """An OpenAI gym wrapper for CARLA simulator."""
@@ -41,16 +42,16 @@ class CarlaEnv(gym.Env):
             'continuous_accel_range': [-3.0, 3.0],  # continuous acceleration range
             'continuous_steer_range': [-0.3, 0.3],  # continuous steering angle range
             'ego_vehicle_filter': 'vehicle.tesla.model3',  # filter for defining ego vehicle
-            'port': 9500,  # connection port
-            'town': 'Town01',  # which town to simulate
+            'port': 2000,  # connection port
+            'town': 'Town03',  # which town to simulate
             'task_mode': 'random',  # mode of the task, [random, roundabout (only for Town03)]
-            'max_time_episode': 1000,  # maximum timesteps per episode
+            'max_time_episode': 100,  # maximum timesteps per episode
             'max_waypt': 12,  # maximum number of waypoints
             'obs_range': 32,  # observation range (meter)
             'lidar_bin': 0.125,  # bin size of lidar sensor (meter)
             'd_behind': 12,  # distance behind the ego vehicle (meter)
             'out_lane_thres': 2.0,  # threshold for out of lane
-            'desired_speed': 8,  # desired speed (m/s)
+            'desired_speed': 4,  # desired speed (m/s)
             'max_ego_spawn_times': 100,  # maximum times to spawn ego vehicle
             'target_waypt_index': 1,  # index of the target way point
         }
@@ -92,13 +93,16 @@ class CarlaEnv(gym.Env):
                                            np.array([params['continuous_accel_range'][1],
                                                      params['continuous_steer_range'][1]]),
                                            dtype=np.float32)  # acc, steer
-        self.observation_space = spaces.Box(-np.ones(3) * 10, np.ones(3) * 10, dtype=np.float32)
+        self.observation_space = spaces.Box(-np.ones(15) * 10, np.ones(15) * 10, dtype=np.float32)
+        self.num_surr = 0
+        self.surr = []
         """
         self.observation_space = spaces.Dict(
             {'birdeye': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
              'lidar': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
-             'camera': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8)})
-
+             'camera': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
+             'lowd_obs': spaces.Box(-np.ones(15) * 10, np.ones(15) * 10, dtype=np.float32)})
+        
         # Connect to carla server and get world object
         print('connecting to Carla server...')
         client = carla.Client('localhost', params['port'])
@@ -239,10 +243,21 @@ class CarlaEnv(gym.Env):
         while count > 0:
             if self._try_spawn_random_vehicle_at(random.choice(self.vehicle_spawn_points), number_of_wheels=[4]):
                 count -= 1
-
-        self._try_spawn_random_vehicle_at(self._set_carla_transform([217.7, 129.4758, 180.0]),
-                                          number_of_wheels=[4],
-                                          autopilot_bool=False)
+        self.num_surr = 0
+        self.surr = []
+        self.is_surr = [random.choice([0, 1]), random.choice([0, 1]), random.choice([0, 1])]
+        if self.is_surr[0]:
+            self._try_spawn_random_vehicle_at(self._set_carla_transform([-88.7, -80.0, 90.0]),
+                                              number_of_wheels=[4],
+                                              autopilot_bool=False)
+        if self.is_surr[1]:
+            self._try_spawn_random_vehicle_at(self._set_carla_transform([-88.7, -110.0, 90.0]),
+                                              number_of_wheels=[4],
+                                              autopilot_bool=False)
+        if self.is_surr[2]:
+            self._try_spawn_random_vehicle_at(self._set_carla_transform([-85.0, -90.0, 90.0]),
+                                              number_of_wheels=[4],
+                                              autopilot_bool=False)
 
         # Spawn pedestrians
         random.shuffle(self.walker_spawn_points)
@@ -272,7 +287,7 @@ class CarlaEnv(gym.Env):
                 self.reset()
 
             if self.task_mode == 'random':
-                self.start = [237.7, 129.4758, 180.0]  # static
+                self.start = [-88.7, -100.0, 90.0]  # static
                 transform = self._set_carla_transform(self.start)
             # transform = random.choice(self.vehicle_spawn_points)
             if self.task_mode == 'roundabout':
@@ -284,6 +299,7 @@ class CarlaEnv(gym.Env):
             else:
                 ego_spawn_times += 1
                 time.sleep(0.1)
+        self.ego.set_velocity(carla.Vector3D(0,3,0))
 
         # Add collision sensor
         self.collision_sensor = self.world.spawn_actor(self.collision_bp, carla.Transform(), attach_to=self.ego)
@@ -329,8 +345,8 @@ class CarlaEnv(gym.Env):
 
         # Set ego information for render
         self.birdeye_render.set_hero(self.ego, self.ego.id)
-        lowd_obs = np.concatenate((self._get_obs()['tracking'], self._get_obs()['obs_avoi']))
-        return lowd_obs
+        lowd_obs = np.concatenate([self._get_obs()['tracking']]+[obs_avoi for obs_avoi in self._get_obs()['obs_avoi']])
+        return self._get_obs()['lowd_obs']
 
     def step(self, action):
         # Calculate acceleration and steering
@@ -338,7 +354,7 @@ class CarlaEnv(gym.Env):
             acc = self.discrete_act[0][action // self.n_steer]
             steer = self.discrete_act[1][action % self.n_steer]
         else:
-            acc = action[0]
+            acc = action[0]+1
             steer = action[1]
 
         # Convert acceleration to throttle and brake
@@ -379,9 +395,9 @@ class CarlaEnv(gym.Env):
         self.total_step += 1
 
         obs = self._get_obs()['tracking']
-        cost = 1 / 2 * action[0] ** 2 + 5 * action[1] ** 2 + 1 / 2 * obs[0] ** 2 + 500 * obs[1] ** 2 + 500 * (obs[2] - 3) ** 2
-        lowd_obs = np.concatenate((self._get_obs()['tracking'], self._get_obs()['obs_avoi']))
-        return lowd_obs, -cost, self._terminal(), copy.deepcopy(info)
+        cost = 1/2 * action[0] ** 2 + 50 * action[1] ** 2 + 500 * obs[0] ** 2 + 500 * obs[1] ** 2 + 500 * (obs[2] - 3) ** 2
+        lowd_obs = np.concatenate([self._get_obs()['tracking']]+[obs_avoi for obs_avoi in self._get_obs()['obs_avoi']])
+        return self._get_obs()['lowd_obs'], self._get_reward(), self._terminal(), copy.deepcopy(info)
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
@@ -446,10 +462,13 @@ class CarlaEnv(gym.Env):
         blueprint = self._create_vehicle_bluepprint('vehicle.*', number_of_wheels=number_of_wheels)
         blueprint.set_attribute('role_name', 'autopilot')
         vehicle = self.world.try_spawn_actor(blueprint, transform)
-        self.front_car = vehicle  # here there is only one vehicle
+        self.surr.append(vehicle)  # here there is only one vehicle
+        self.num_surr += 1
         if vehicle is not None and autopilot_bool:
             vehicle.set_autopilot()
             return True
+        else:
+            vehicle.set_velocity(carla.Vector3D(0,3,0))
         return False
 
     def _try_spawn_random_walker_at(self, transform):
@@ -697,20 +716,45 @@ class CarlaEnv(gym.Env):
                                        np.array(np.array([np.cos(ego_yaw), np.sin(ego_yaw)]))))
         v = self.ego.get_velocity()
         speed = np.sqrt(v.x ** 2 + v.y ** 2)
+        tracking = np.array([lateral_dis, - delta_yaw, speed])
+        obs_avoi = []
 
         # delta state: state difference between ego and front car
-        front_trans = self.front_car.get_transform()
-        front_x = front_trans.location.x
-        front_y = front_trans.location.y
-        front_v = self.front_car.get_velocity()
-        delta_s = np.sqrt((ego_x - front_x) ** 2 + (ego_y - front_y) ** 2)
-        delta_v = np.sqrt((v.x - front_v.x) ** 2 + (v.y - front_v.y) ** 2)
+        for i in range(self.num_surr):
+            surr_trans = self.surr[i].get_transform()
+            surr_x = surr_trans.location.x
+            surr_y = surr_trans.location.y
+            surr_yaw = surr_trans.rotation.yaw / 180 * np.pi
+            delta_x = (surr_y-ego_y)*np.cos(ego_yaw) + (ego_x-surr_x)*np.sin(ego_yaw)
+            delta_y = (surr_y-ego_y)*np.sin(ego_yaw) - (ego_x-surr_x)*np.cos(ego_yaw)
+            delta_yaw = surr_yaw - ego_yaw
+            surr_v = self.surr[i].get_velocity()
+            delta_vx = (surr_v.y-v.y)*np.cos(ego_yaw) - (surr_v.x-v.x)*np.sin(ego_yaw)
+            delta_vy = (surr_v.y-v.y)*np.sin(ego_yaw) + (surr_v.x-v.x)*np.cos(ego_yaw)
+            obs_avoi.append(np.array([delta_x, delta_y, delta_vx, delta_vy]))
 
-        tracking = np.array([lateral_dis, - delta_yaw, speed])
-        obs_avoi = np.array([delta_s, delta_v])
-
+        lowd_obs = np.concatenate([tracking] + [i for i in obs_avoi])
+        if lowd_obs.shape[0] < 15:
+            lowd_obs = np.concatenate([lowd_obs, np.zeros(15-lowd_obs.shape[0])])
+        surr_nodes = np.zeros([self.num_surr, 3])
+        surr_nodes[:, 2] = np.ones([self.num_surr])*0.3
+        """
+        nodes = np.vstack([np.expand_dims(tracking, axis=0), surr_nodes])
+        edges = np.vstack([i for i in obs_avoi])
+        senders = np.array([i for i in range(1, self.num_surr+1)])
+        receivers = np.zeros(self.num_surr)
+        globals = np.ones([1])
+        data_dict = {
+            "globals": globals,
+            "nodes": nodes,
+            "edges": edges,
+            "senders": senders,
+            "receivers": receivers
+        }
+        graph = utils_np.data_dicts_to_graphs_tuple([data_dict])"""
         obs = {'birdeye': birdeye, 'lidar': lidar, 'camera': camera,
-               'vh_clas': vh_clas, 'vh_reg_map': vh_regr, 'tracking': tracking, 'obs_avoi': obs_avoi}
+               'vh_clas': vh_clas, 'vh_reg_map': vh_regr, 'tracking': tracking,
+               'obs_avoi': obs_avoi, 'lowd_obs': lowd_obs}
 
         # TODO: front vehicle set starting speed --> read ego vehicle setting & design reward function
 
@@ -798,7 +842,7 @@ class CarlaEnv(gym.Env):
         # If out of lane
         dis, _ = self._get_lane_dis(self.waypoints, ego_x, ego_y)
         if abs(dis) > self.out_lane_thres:
-            return False
+            return True
 
         return False
 
