@@ -49,6 +49,8 @@ class CarlaEnv(gym.Env):
     self.display_route = params['display_route']
     self.pixor_size = params['pixor_size']
     self.pixor = params['pixor']
+    self.pixor_speed = params['pixor_speed']
+    self.speed_scale_for_pixor = params['speed_scale_for_pixor']
 
     # Destination
     if params['task_mode'] == 'roundabout':
@@ -77,9 +79,16 @@ class CarlaEnv(gym.Env):
       observation_space_dict.update({
         'roadmap': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
         'vh_clas': spaces.Box(low=0, high=1, shape=(self.pixor_size, self.pixor_size, 1), dtype=np.float32),
-        'vh_regr': spaces.Box(low=-5, high=5, shape=(self.pixor_size, self.pixor_size, 6), dtype=np.float32),
         'pixor_state': spaces.Box(np.array([-1000, -1000, -1, -1, -5]), np.array([1000, 1000, 1, 1, 20]), dtype=np.float32)
         })
+      if self.pixor_speed:
+        observation_space_dict.update({
+          'vh_regr': spaces.Box(low=-5, high=5, shape=(self.pixor_size, self.pixor_size, 8), dtype=np.float32),
+          })
+      else:
+        observation_space_dict.update({
+          'vh_regr': spaces.Box(low=-5, high=5, shape=(self.pixor_size, self.pixor_size, 6), dtype=np.float32),
+          })
     self.observation_space = spaces.Dict(observation_space_dict)
 
     # Connect to carla server and get world object
@@ -581,7 +590,10 @@ class CarlaEnv(gym.Env):
     if self.pixor:
       ## Vehicle classification and regression maps (requires further normalization)
       vh_clas = np.zeros((self.pixor_size, self.pixor_size))
-      vh_regr = np.zeros((self.pixor_size, self.pixor_size, 6))
+      if self.pixor_speed:
+        vh_regr = np.zeros((self.pixor_size, self.pixor_size, 8))
+      else:
+        vh_regr = np.zeros((self.pixor_size, self.pixor_size, 6))
 
       # Generate the PIXOR image. Note in CARLA it is using left-hand coordinate
       def get_actor_info(actor):
@@ -594,6 +606,23 @@ class CarlaEnv(gym.Env):
         l=bb.extent.x  # half the length
         w=bb.extent.y  # half the width
         return (x, y, yaw, l, w)
+
+      def get_actor_local_velocity2D(actor, abs_speed=True):
+        vel = actor.get_velocity()
+        trans=actor.get_transform()
+        yaw=trans.rotation.yaw/180*np.pi
+        vel_ego = self.ego.get_velocity()
+        trans_ego = self.ego.get_transform()
+        yaw_ego=trans_ego.rotation.yaw/180*np.pi
+        
+        R = np.array([[np.cos(ego_yaw), np.sin(ego_yaw)], 
+          [-np.sin(ego_yaw), np.cos(ego_yaw)]])
+        if abs_speed:
+          vel_local = R.dot([vel.x, vel.y])
+        else:
+          vel_local = R.dot([vel.x-vel_ego.x, vel.y-vel_ego.y])
+
+        return vel_local
 
       def global_to_local_pose(pose, ego_pose):
         x, y, yaw = pose
@@ -649,15 +678,24 @@ class CarlaEnv(gym.Env):
           sin_t = np.sin(yaw_pixel)
           logw = np.log(w_pixel)
           logl = np.log(l_pixel)
+          if self.pixor_speed:
+            dvx, dvy = get_actor_local_velocity2D(actor, abs_speed=True)
+            dvx /= self.speed_scale_for_pixor
+            dvy /= self.speed_scale_for_pixor
           pixels = get_pixels_from_info((x_pixel, y_pixel, yaw_pixel, l_pixel, w_pixel))
           for pixel in pixels:
             vh_clas[pixel[0], pixel[1]] = 1
             dx = x_pixel - pixel[0]
             dy = y_pixel - pixel[1]
-            vh_regr[pixel[0], pixel[1], :] = np.array(
-              [cos_t, sin_t, dx, dy, logw, logl])
+            if self.pixor_speed:
+              vh_regr[pixel[0], pixel[1], :] = np.array(
+                [cos_t, sin_t, dx, dy, logw, logl, dvx, dvy])
+            else:
+              vh_regr[pixel[0], pixel[1], :] = np.array(
+                [cos_t, sin_t, dx, dy, logw, logl])
 
-      # Flip the image matrix so that the origin is at the left-bottom
+      # The original image matrix is a right-hand coordinate with origin at left-top
+      # Flip the image matrix so that the origin is at the left-bottom with left-hand coordinate
       vh_clas = np.flip(vh_clas, axis=0)
       vh_regr = np.flip(vh_regr, axis=0)
 

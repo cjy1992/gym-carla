@@ -481,7 +481,7 @@ class BirdeyeRender(object):
           corners.append(carla.Location(x=p[0],y=p[1]))
         corners.append(carla.Location(x=poly[0][0],y=poly[0][1]))
         corners = [world_to_pixel(p) for p in corners]
-        color_value = max(0.8 - 0.8/lp*(i+1), 0)
+        color_value = max(1.0 - 1.0/lp*(i+1), 0)
         if ID == self.hero_id:
           # red
           color = pygame.Color(255, math.floor(color_value*255), math.floor(color_value*255))
