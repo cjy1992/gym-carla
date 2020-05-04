@@ -29,14 +29,17 @@ def main():
     'max_time_episode': 1000,  # maximum timesteps per episode
     'max_waypt': 12,  # maximum number of waypoints
     'obs_range': 32,  # observation range (meter)
-    'lidar_bin': 0.125,  # bin size of lidar sensor (meter)
-    'd_behind': 12,  # distance behind the ego vehicle (meter)
+    'lidar_bin': 0.25,  # bin size of lidar sensor (meter)
+    'd_behind': 0,  # distance behind the ego vehicle (meter)
     'out_lane_thres': 2.0,  # threshold for out of lane
     'desired_speed': 8,  # desired speed (m/s)
     'max_ego_spawn_times': 200,  # maximum times to spawn ego vehicle
     'display_route': True,  # whether to render the desired route
-    'pixor_size': 64,  # size of the pixor labels
+    'pixor_size': 128,  # size of the pixor labels
     'pixor': False,  # whether to output PIXOR observation
+    'pred_delta': 4,  # The prediction interval between two steps
+    'pred_step': 6,  # Steps to predict
+    'pred': True,  # Whether to do prediction
   }
 
   # Set gym-carla environment
