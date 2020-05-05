@@ -406,7 +406,7 @@ class CarlaEnv(gym.Env):
     vehicle = None
     # Check if ego position overlaps with surrounding vehicles
     overlap = False
-    for idx, poly in self.vehicle_polygons[0].items():
+    for idx, poly in self.vehicle_polygons[-1].items():
       poly_center = np.mean(poly, axis=0)
       ego_center = np.array([transform.location.x, transform.location.y])
       dis = np.linalg.norm(poly_center - ego_center)
