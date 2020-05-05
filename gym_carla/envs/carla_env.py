@@ -12,9 +12,6 @@ import numpy as np
 import pygame
 import random
 import time
-
-from collections import deque
-from matplotlib.path import Path
 from skimage.transform import resize
 
 import gym
@@ -24,6 +21,7 @@ import carla
 
 from gym_carla.envs.render import BirdeyeRender
 from gym_carla.envs.route_planner import RoutePlanner
+from gym_carla.envs.misc import *
 
 
 class CarlaEnv(gym.Env):
@@ -47,8 +45,11 @@ class CarlaEnv(gym.Env):
     self.desired_speed = params['desired_speed']
     self.max_ego_spawn_times = params['max_ego_spawn_times']
     self.display_route = params['display_route']
-    self.pixor_size = params['pixor_size']
-    self.pixor = params['pixor']
+    if 'pixor' in params.keys():
+      self.pixor = params['pixor']
+      self.pixor_size = params['pixor_size']
+    else:
+      self.pixor = False
 
     # Destination
     if params['task_mode'] == 'roundabout':
@@ -141,9 +142,10 @@ class CarlaEnv(gym.Env):
     self._init_renderer()
 
     # Get pixel grid points
-    x, y = np.meshgrid(np.arange(self.pixor_size), np.arange(self.pixor_size)) # make a canvas with coordinates
-    x, y = x.flatten(), y.flatten()
-    self.pixel_grid = np.vstack((x,y)).T 
+    if self.pixor:
+      x, y = np.meshgrid(np.arange(self.pixor_size), np.arange(self.pixor_size)) # make a canvas with coordinates
+      x, y = x.flatten(), y.flatten()
+      self.pixel_grid = np.vstack((x, y)).T
 
   def reset(self):
     # Clear sensor objects  
@@ -202,7 +204,7 @@ class CarlaEnv(gym.Env):
       if self.task_mode == 'roundabout':
         self.start=[52.1+np.random.uniform(-5,5),-4.2, 178.66] # random
         # self.start=[52.1,-4.2, 178.66] # static
-        transform = self._set_carla_transform(self.start)
+        transform = set_carla_transform(self.start)
       if self._try_spawn_ego_vehicle_at(transform):
         break
       else:
@@ -423,21 +425,6 @@ class CarlaEnv(gym.Env):
       
     return False
 
-  def _set_carla_transform(self, pose):
-    """Get a carla tranform object given pose.
-
-    Args:
-      pose: [x, y, yaw].
-
-    Returns:
-      transform: the carla transform object
-    """
-    transform = carla.Transform()
-    transform.location.x = pose[0]
-    transform.location.y = pose[1]
-    transform.rotation.yaw = pose[2]
-    return transform
-
   def _get_actor_polygons(self, filt):
     """Get the bounding box polygon of actors.
 
@@ -467,29 +454,6 @@ class CarlaEnv(gym.Env):
       actor_poly_dict[actor.id]=poly
     return actor_poly_dict
 
-  def _get_ego(self):
-    """ Get the ego vehicle object
-    """
-    return self.ego
-
-  def _display_to_rgb(self, display):
-    """ Transform image grabbed from pygame display to an rgb image uint8 matrix
-    """
-    rgb = np.fliplr(np.rot90(display, 3))  # flip to regular view
-    rgb = resize(rgb, (self.obs_size, self.obs_size))  # resize
-    rgb = rgb * 255
-    return rgb
-
-  def _rgb_to_display_surface(self, rgb):
-    """ Generate pygame surface given an rgb image uint8 matrix
-    """
-    surface = pygame.Surface((self.display_size, self.display_size)).convert()
-    display = resize(rgb, (self.display_size, self.display_size))
-    display = np.flip(display, axis=1)
-    display = np.rot90(display, 1)
-    pygame.surfarray.blit_array(surface, display)
-    return surface
-
   def _get_obs(self):
     """Get the observations."""
     ## Birdeye rendering
@@ -504,7 +468,7 @@ class CarlaEnv(gym.Env):
     self.birdeye_render.render(self.display, birdeye_render_types)
     birdeye = pygame.surfarray.array3d(self.display)
     birdeye = birdeye[0:self.display_size, :, :]
-    birdeye = self._display_to_rgb(birdeye)
+    birdeye = display_to_rgb(birdeye, self.obs_size)
 
     # Roadmap
     if self.pixor:
@@ -514,7 +478,7 @@ class CarlaEnv(gym.Env):
       self.birdeye_render.render(self.display, roadmap_render_types)
       roadmap = pygame.surfarray.array3d(self.display)
       roadmap = roadmap[0:self.display_size, :, :]
-      roadmap = self._display_to_rgb(roadmap)
+      roadmap = display_to_rgb(roadmap, self.obs_size)
       # Add ego vehicle
       for i in range(self.obs_size):
         for j in range(self.obs_size):
@@ -522,7 +486,7 @@ class CarlaEnv(gym.Env):
             roadmap[i, j, :] = birdeye[i, j, :]
 
     # Display birdeye image
-    birdeye_surface = self._rgb_to_display_surface(birdeye)
+    birdeye_surface = rgb_to_display_surface(birdeye, self.display_size)
     self.display.blit(birdeye_surface, (0, 0))
 
     ## Lidar image generation
@@ -555,12 +519,12 @@ class CarlaEnv(gym.Env):
     lidar = lidar * 255
 
     # Display lidar image
-    lidar_surface = self._rgb_to_display_surface(lidar)
+    lidar_surface = rgb_to_display_surface(lidar, self.display_size)
     self.display.blit(lidar_surface, (self.display_size, 0))
 
     ## Display camera image
     camera = resize(self.camera_img, (self.obs_size, self.obs_size)) * 255
-    camera_surface = self._rgb_to_display_surface(camera)
+    camera_surface = rgb_to_display_surface(camera, self.display_size)
     self.display.blit(camera_surface, (self.display_size * 2, 0))
 
     # Display on pygame
@@ -571,7 +535,7 @@ class CarlaEnv(gym.Env):
     ego_x = ego_trans.location.x
     ego_y = ego_trans.location.y
     ego_yaw = ego_trans.rotation.yaw/180*np.pi
-    lateral_dis, w = self._get_preview_lane_dis(self.waypoints, ego_x, ego_y)
+    lateral_dis, w = get_preview_lane_dis(self.waypoints, ego_x, ego_y)
     delta_yaw = np.arcsin(np.cross(w, 
       np.array(np.array([np.cos(ego_yaw), np.sin(ego_yaw)]))))
     v = self.ego.get_velocity()
@@ -584,72 +548,21 @@ class CarlaEnv(gym.Env):
       vh_regr = np.zeros((self.pixor_size, self.pixor_size, 6))
 
       # Generate the PIXOR image. Note in CARLA it is using left-hand coordinate
-      def get_actor_info(actor):
-        trans=actor.get_transform()
-        x=trans.location.x
-        y=trans.location.y
-        yaw=trans.rotation.yaw/180*np.pi
-        # Get length and width
-        bb=actor.bounding_box
-        l=bb.extent.x  # half the length
-        w=bb.extent.y  # half the width
-        return (x, y, yaw, l, w)
-
-      def global_to_local_pose(pose, ego_pose):
-        x, y, yaw = pose
-        ego_x, ego_y, ego_yaw = ego_pose
-        R = np.array([[np.cos(ego_yaw), np.sin(ego_yaw)], 
-          [-np.sin(ego_yaw), np.cos(ego_yaw)]])
-        vec_local = R.dot(np.array([x - ego_x, y - ego_y]))
-        yaw_local = yaw - ego_yaw
-        return (vec_local[0], vec_local[1], yaw_local)
-
-      def local_to_pixel_info(info):
-        """Here the ego local coordinate is left-handed, the pixel
-        coordinate is also left-handed, with its origin at the left bottom.
-        """
-        x, y, yaw, l, w = info
-        x_pixel = (x + self.d_behind)/self.obs_range*self.pixor_size 
-        y_pixel = y/self.obs_range*self.pixor_size + self.pixor_size/2
-        yaw_pixel = yaw
-        l_pixel = l/self.obs_range*self.pixor_size
-        w_pixel = w/self.obs_range*self.pixor_size
-        return (x_pixel, y_pixel, yaw_pixel, l_pixel, w_pixel)
-
-      def get_pixels_from_info(info):
-        """Get pixels from information in pixel coordinate, 
-        which the origin is at the left bottom.
-        """
-        poly = get_poly_from_info(info)     
-        p = Path(poly) # make a polygon
-        grid = p.contains_points(self.pixel_grid)
-        isinPoly = np.where(grid==True)
-        pixels = np.take(self.pixel_grid, isinPoly, axis=0)[0]
-        return pixels
-
-      def get_poly_from_info(info):
-        x, y, yaw, l, w = info
-        poly_local=np.array([[l,w],[l,-w],[-l,-w],[-l,w]]).transpose()
-        # Get rotation matrix to transform to the coordinate
-        R=np.array([[np.cos(yaw),-np.sin(yaw)],[np.sin(yaw),np.cos(yaw)]])
-        # Get bounding box polygon
-        poly=np.matmul(R,poly_local).transpose()+np.repeat([[x,y]],4,axis=0)
-        return poly
-
       # Get the 6-dim geom parametrization in PIXOR, here we use pixel coordinate
-      # for convenience
       for actor in self.world.get_actors().filter('vehicle.*'):
-        x, y, yaw, l, w = get_actor_info(actor)
-        x_local, y_local, yaw_local = global_to_local_pose(
-          (x, y, yaw), (ego_x, ego_y, ego_yaw))
+        x, y, yaw, l, w = get_info(actor)
+        x_local, y_local, yaw_local = get_local_pose((x, y, yaw), (ego_x, ego_y, ego_yaw))
         if actor.id != self.ego.id and np.sqrt(x_local**2 + y_local**2) < self.obs_range**1.5:
-          x_pixel, y_pixel, yaw_pixel, l_pixel, w_pixel = local_to_pixel_info(
-            (x_local, y_local, yaw_local, l, w))
+          x_pixel, y_pixel, yaw_pixel, l_pixel, w_pixel = get_pixel_info(
+            local_info=(x_local, y_local, yaw_local, l, w),
+            d_behind=self.d_behind, obs_range=self.obs_range, image_size=self.pixor_size)
           cos_t = np.cos(yaw_pixel)
           sin_t = np.sin(yaw_pixel)
           logw = np.log(w_pixel)
           logl = np.log(l_pixel)
-          pixels = get_pixels_from_info((x_pixel, y_pixel, yaw_pixel, l_pixel, w_pixel))
+          pixels = get_pixels_inside_vehicle(
+            pixel_info=(x_pixel, y_pixel, yaw_pixel, l_pixel, w_pixel),
+            pixel_grid=self.pixel_grid)
           for pixel in pixels:
             vh_clas[pixel[0], pixel[1]] = 1
             dx = x_pixel - pixel[0]
@@ -697,8 +610,8 @@ class CarlaEnv(gym.Env):
     r_steer = -self.ego.get_control().steer**2
 
     # reward for out of lane
-    ego_x, ego_y = self._get_ego_pos()
-    dis, w = self._get_lane_dis(self.waypoints, ego_x, ego_y)
+    ego_x, ego_y = get_pos(self.ego)
+    dis, w = get_lane_dis(self.waypoints, ego_x, ego_y)
     r_out = 0
     if abs(dis) > self.out_lane_thres:
       r_out = -1
@@ -719,43 +632,10 @@ class CarlaEnv(gym.Env):
 
     return r
 
-  def _get_ego_pos(self):
-    """Get the ego vehicle pose (x, y)."""
-    ego_trans = self.ego.get_transform()
-    ego_x = ego_trans.location.x
-    ego_y = ego_trans.location.y
-    return ego_x, ego_y
-
-  def _get_lane_dis(self, waypoints, x, y):
-    """Calculate distance from (x, y) to waypoints."""
-    dis_min = 1000
-    for pt in waypoints:
-      d = np.sqrt((x-pt[0])**2 + (y-pt[1])**2)
-      if d < dis_min:
-        dis_min = d
-        waypt=pt
-    vec = np.array([x - waypt[0],y - waypt[1]])
-    lv = np.linalg.norm(np.array(vec))
-    w = np.array([np.cos(waypt[2]/180*np.pi), np.sin(waypt[2]/180*np.pi)])
-    cross = np.cross(w, vec/lv)
-    dis = - lv * cross
-    return dis, w
-
-  def _get_preview_lane_dis(self, waypoints, x, y, idx=2):
-    """Calculate distance from (x, y) to waypoints."""
-    dis_min = 1000
-    waypt = waypoints[idx]
-    vec = np.array([x - waypt[0],y - waypt[1]])
-    lv = np.linalg.norm(np.array(vec))
-    w = np.array([np.cos(waypt[2]/180*np.pi), np.sin(waypt[2]/180*np.pi)])
-    cross = np.cross(w, vec/lv)
-    dis = - lv * cross
-    return dis, w
-
   def _terminal(self):
     """Calculate whether to terminate the current episode."""
     # Get ego state
-    ego_x, ego_y = self._get_ego_pos()
+    ego_x, ego_y = get_pos(self.ego)
 
     # If collides
     if len(self.collision_hist)>0: 
@@ -772,7 +652,7 @@ class CarlaEnv(gym.Env):
           return True
 
     # If out of lane
-    dis, _ = self._get_lane_dis(self.waypoints, ego_x, ego_y)
+    dis, _ = get_lane_dis(self.waypoints, ego_x, ego_y)
     if abs(dis) > self.out_lane_thres:
       return True
 
