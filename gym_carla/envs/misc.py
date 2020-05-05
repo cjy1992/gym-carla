@@ -13,7 +13,7 @@ import math
 import numpy as np
 import carla
 import pygame
-import matplotlib
+from matplotlib.path import Path
 import skimage
 
 
@@ -115,7 +115,7 @@ def get_pixels_inside_vehicle(pixel_info, pixel_grid):
   :return: the pixels that are inside the vehicle
   """
   poly = get_poly_from_info(pixel_info)
-  p = matplotlib.path.Path(poly)  # make a polygon
+  p = Path(poly)  # make a polygon
   grid = p.contains_points(pixel_grid)
   isinPoly = np.where(grid == True)
   pixels = np.take(pixel_grid, isinPoly, axis=0)[0]

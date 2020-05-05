@@ -552,23 +552,24 @@ class CarlaEnv(gym.Env):
       for actor in self.world.get_actors().filter('vehicle.*'):
         x, y, yaw, l, w = get_info(actor)
         x_local, y_local, yaw_local = get_local_pose((x, y, yaw), (ego_x, ego_y, ego_yaw))
-        if actor.id != self.ego.id and np.sqrt(x_local**2 + y_local**2) < self.obs_range**1.5:
-          x_pixel, y_pixel, yaw_pixel, l_pixel, w_pixel = get_pixel_info(
-            local_info=(x_local, y_local, yaw_local, l, w),
-            d_behind=self.d_behind, obs_range=self.obs_range, image_size=self.pixor_size)
-          cos_t = np.cos(yaw_pixel)
-          sin_t = np.sin(yaw_pixel)
-          logw = np.log(w_pixel)
-          logl = np.log(l_pixel)
-          pixels = get_pixels_inside_vehicle(
-            pixel_info=(x_pixel, y_pixel, yaw_pixel, l_pixel, w_pixel),
-            pixel_grid=self.pixel_grid)
-          for pixel in pixels:
-            vh_clas[pixel[0], pixel[1]] = 1
-            dx = x_pixel - pixel[0]
-            dy = y_pixel - pixel[1]
-            vh_regr[pixel[0], pixel[1], :] = np.array(
-              [cos_t, sin_t, dx, dy, logw, logl])
+        if actor.id != self.ego.id:
+          if abs(y_local)<self.obs_range/2+1 and x_local<self.obs_range-self.d_behind+1 and x_local>-self.d_behind-1:
+            x_pixel, y_pixel, yaw_pixel, l_pixel, w_pixel = get_pixel_info(
+              local_info=(x_local, y_local, yaw_local, l, w),
+              d_behind=self.d_behind, obs_range=self.obs_range, image_size=self.pixor_size)
+            cos_t = np.cos(yaw_pixel)
+            sin_t = np.sin(yaw_pixel)
+            logw = np.log(w_pixel)
+            logl = np.log(l_pixel)
+            pixels = get_pixels_inside_vehicle(
+              pixel_info=(x_pixel, y_pixel, yaw_pixel, l_pixel, w_pixel),
+              pixel_grid=self.pixel_grid)
+            for pixel in pixels:
+              vh_clas[pixel[0], pixel[1]] = 1
+              dx = x_pixel - pixel[0]
+              dy = y_pixel - pixel[1]
+              vh_regr[pixel[0], pixel[1], :] = np.array(
+                [cos_t, sin_t, dx, dy, logw, logl])
 
       # Flip the image matrix so that the origin is at the left-bottom
       vh_clas = np.flip(vh_clas, axis=0)
