@@ -1,5 +1,5 @@
 # gym-carla
-Official [OpenAI gym third party environment](https://github.com/openai/gym/blob/master/docs/environments.md) for CARLA simulator.
+An [OpenAI gym third party environment](https://github.com/openai/gym/blob/master/docs/environments.md) for [CARLA simulator](http://carla.org/).
 
 ## System Requirements
 - Ubuntu 16.04
