@@ -675,24 +675,36 @@ class CarlaEnv(gym.Env):
     pixor_state = [ego_x, ego_y, np.cos(ego_yaw), np.sin(ego_yaw), speed]
 
 
+    """
+    Explanation of how my costmap implementation works:
+      First we get a list of all of the waypoints from the current position. We iterate through this list in pairs so that there is a current 
+      waypoint and a previous waypoint. These along with parameter cost are passed into _get_costmap which returns a costmap only relevant to the
+      lane defined by the line between the two points. This costmap is summed with the global costmap. This profess is repeated for the left and right
+      lanes of the current waypoint if they exist and are in the same direction.  
+    """
     def _get_perp_dis(x1, y1, x2, y2, x3, y3):
+    """ Computes the perpindicular distance between a point (x3,y3) and a line segment defined by points
+        (x1, y1) and (x2, y2). If the point doesn't have a perpincicular line within the line segment, the
+        distance is inf
+    """  
       x = np.array([x3, y3])
       p = np.array([x1, y1])
       q = np.array([x2, y2])
-      #compute whether point x is even in the range of the line
-      lamb = np.dot((x - p), (q - p)) / np.dot((q - p), (q - p))
+      lamb = np.dot((x - p), (q - p)) / np.dot((q - p), (q - p)) #lamb checks if point is within line segment
       if lamb <= 1 and lamb >= 0:
         s = p + (lamb * (q - p))
-        return np.linalg.norm(x - s)#abs( ((y2 - y1) * x3) - ((x2 - x1) * y3) + (x2 * y1) - (y2 * x1)) / np.sqrt((y2 - y1) **2 + (x2 - x1) ** 2)
+        return np.linalg.norm(x - s)
       return float('inf')
 
-    """_get_costmap generates a costmap for a current waypoint and its preceding waypoint.
-    I refer a lot to global vs local frame. Global means the xy coordinate in the Carla coordinates
-    Local is the coordinate in the costmap matrix.
-    Also the letters x and y are swapped when referring to the local frame. I have to fix this later because
-    it's confusing to read but it works """
+
+    ego_y = ego_y - 2 #shift the cost map down because originally it was too high 
 
     def _get_costmap(pWaypoint, cWaypoint, cost):
+    """ Generates a costmap for a current waypoint cWaypoint and its preceding waypoint pWaypoint using cost.
+        I refer a lot to global vs local frame. Global means the xy coordinate in the Carla coordinates
+        Local is the coordinate in the costmap matrix.
+        Also the letters x and y are swapped when referring to the local frame but it works 
+    """
       single_costmap = np.zeros((self.obs_size, self.obs_size))
 
       #Definitions for the waypoints' x and y coordinates in the global frame 
@@ -732,69 +744,67 @@ class CarlaEnv(gym.Env):
 
       return single_costmap
 
-
-    """
-    Explanation of how my costmap implementation works:
-      First we get a list of all of the waypoints from the current position. We iterate through this list in pairs so that there is a current 
-      waypoint and a previous waypoint. These along with parameter cost are passed into _get_costmap which returns a costmap only relevant to the
-      lane defined by the line between the two points. This costmap is summed with the global costmap. This profess is repeated for the left and right
-      lanes of the current waypoint if they exist and are in the same direction.  
-    """
-
-
-
-
     #Generate list of waypoints. Previously, we relied on self.routeplanner._actualWaypoints
     #there is way to save space for this. Instead of recalculating all waypoints, we can reuse most of them.
 
     #we can do this for each neighboring lane 
-    waypoint_to_sample = [self.world.get_map().get_waypoint(self.ego.get_location())]
-    if waypoint_to_sample[0].get_left_lane():
-      waypoint_to_sample.append(waypoint_to_sample[0].get_left_lane())
-    if waypoint_to_sample[0].get_right_lane():
-      waypoint_to_sample.append(waypoint_to_sample[0].get_right_lane())
-    directionsList = []
-    for current_waypoint in waypoint_to_sample:
-      #current_waypoint = self.world.get_map().get_waypoint(self.ego.get_location())
-      sampling_radius = 5
-      #currentWaypoints = current_waypoint.next_until_lane_end(sampling_radius)
-      current_waypoints = [current_waypoint]
-      lane_end = False
-      ctr = 0
+    ego_waypoints = [self.world.get_map().get_waypoint(self.ego.get_location())] #make current ego position into a waypoint
+    current_dir= ego_waypoints[0].lane_id #positive or negative integer depending on which direction the lane is going in 
+    left_lane = ego_waypoints[0].get_left_lane()
+    right_lane = ego_waypoints[0].get_right_lane()
 
-      while (not lane_end) and ctr < 10:
+    waypoints_threshold = 5 #this is how many waypoints to keep 
+    sampling_radius = 5 #how many meters away to sample for the next waypoint
+
+    if left_lane and left_lane.lane_type == carla.LaneType.Driving and left_lane.lane_id * current_dir >= 0: #check if neighboring lane exists, is drivable, and in same direction
+      ego_waypoints.append(left_lane)
+
+    if right_lane and right_lane.lane_type == carla.LaneType.Driving and right_lane.lane_id * current_dir >= 0:
+      ego_waypoints.append(right_lane)
+    dir_list = [] #list of lists of waypoints. each list inside represents a possible path
+
+
+    #we loop through ego_waypoints for the center, left, and right lanes 
+    for current_waypoint in ego_waypoints:
+      #current_waypoint = self.world.get_map().get_waypoint(self.ego.get_location())
+      current_waypoints = [current_waypoint]
+      lane_end = False #did we reach the end of the lane
+      ctr = 0 #counter to make sure we don't pass the waypoints threshold
+      next_waypoints = [] #these represents all the other directions we have to go in after the current waypoint. TODO contains a tuple of starting waypoint and list of lists
+      while (not lane_end) and ctr < waypoints_threshold:
         sample_waypoint = current_waypoints[-1]
         ctr += 1
         next_waypoint = sample_waypoint.next(sampling_radius)
 
-        if (sample_waypoint.is_junction):
-          print('JUNCTIONTIOENASTIONI')
+        # if (sample_waypoint.is_junction):
+        #   junc = sample_waypoint.get_junction().get_waypoints(carla.LaneType.Driving)
+        #   print("Sample", sample_waypoint)
+        #   print("Junc", junc)
+        #   for tup in junc:
+        #     if tup[0] == sample_waypoint:
+        #       next_waypoints.append([tup[0], tup[1]])
 
-
-        if (len(next_waypoint) != 1):
+        #TODO so that we don't just stop when there's multiple directions but instead stop when the lane ends 
+        if (len(next_waypoint) != 1): #if there is more than 1 waypoint to go to we stop because we have to explore those directions 
           lane_end = True
-          print("Testing if the last means in junction", sample_waypoint.is_junction)
+          #print("Testing if the last means in junction", sample_waypoint.is_junction)
         else: 
-          current_waypoints.append(next_waypoint[0])
+          current_waypoints.append(next_waypoint[0]) #if there's only one direction just append it to the current array
 
-      print("length of currentWaypoints", len(current_waypoints))
-      last_waypoint = current_waypoints[-1]
+      last_waypoint = current_waypoints[-1] #this will be the starting waypoint for all the diverging lanes 
 
-      directionsList.append(current_waypoints)
-
-      dist = last_waypoint.transform.location.distance(self.ego.get_location())
-      #check if last waypoint is within range of the vehicle
+      dir_list.append(current_waypoints)
 
       if lane_end:
         #this means the lane changes direction so we have to compute the new lanes for the junction
-        print("last waypoint coming up")
+        #print("last waypoint coming up")
         next_waypoints = last_waypoint.next(sampling_radius)
-        print(next_waypoints)
+        #print(next_waypoints)
         for new_direction in next_waypoints: #we append some points
-          new_waypoints = [current_waypoint, new_direction]
+          new_waypoints = [last_waypoint, new_direction]
           ctr = 0
           lane_end = False
-          while (not lane_end) and ctr < 5:
+          while not lane_end and ctr < waypoints_threshold + 5:
             ctr += 1
             sample_waypoint = new_waypoints[-1]
 
@@ -803,17 +813,17 @@ class CarlaEnv(gym.Env):
               lane_end = True
             else: 
               new_waypoints.append(next_waypoint[0])
-          print("new_waypoints", new_waypoints)
-          directionsList.append(new_waypoints)
+          #print('ctr', ctr)
+          #print("new_waypoints", new_waypoints)
+          dir_list.append(new_waypoints)
 
 
     #listofWaypoints = self.routeplanner._actualWaypoints
 
-    #currently working on finding all future lanes for one waypoint. I think the best way to do this is through DFS
     cost = -10
     costmap = np.zeros((self.obs_size, self.obs_size))
 
-    for listofWaypoints in directionsList:
+    for listofWaypoints in dir_list:
       if len(listofWaypoints) < 1:
         print("Not enough waypoints to form costmap")
 
