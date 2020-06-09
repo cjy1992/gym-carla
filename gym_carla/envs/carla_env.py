@@ -72,11 +72,12 @@ class CarlaEnv(gym.Env):
       'camera': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
       'lidar': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
       'birdeye': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
-      'state': spaces.Box(np.array([-2, -1, -5, 0]), np.array([2, 1, 30, 1]), dtype=np.float32)
+      'roadmap': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
+      'state': spaces.Box(np.array([-2, -1, -5, 0]), np.array([2, 1, 30, 1]), dtype=np.float32),
+      'waypoints': spaces.Box(low=-100, high=100, shape=(self.max_waypt, 4), dtype=np.float32)
       }
     if self.pixor:
       observation_space_dict.update({
-        'roadmap': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
         'vh_clas': spaces.Box(low=0, high=1, shape=(self.pixor_size, self.pixor_size, 1), dtype=np.float32),
         'vh_regr': spaces.Box(low=-5, high=5, shape=(self.pixor_size, self.pixor_size, 6), dtype=np.float32),
         'pixor_state': spaces.Box(np.array([-1000, -1000, -1, -1, -5]), np.array([1000, 1000, 1, 1, 20]), dtype=np.float32)
@@ -471,19 +472,18 @@ class CarlaEnv(gym.Env):
     birdeye = display_to_rgb(birdeye, self.obs_size)
 
     # Roadmap
-    if self.pixor:
-      roadmap_render_types = ['roadmap']
-      if self.display_route:
-        roadmap_render_types.append('waypoints')
-      self.birdeye_render.render(self.display, roadmap_render_types)
-      roadmap = pygame.surfarray.array3d(self.display)
-      roadmap = roadmap[0:self.display_size, :, :]
-      roadmap = display_to_rgb(roadmap, self.obs_size)
-      # Add ego vehicle
-      for i in range(self.obs_size):
-        for j in range(self.obs_size):
-          if abs(birdeye[i, j, 0] - 255)<20 and abs(birdeye[i, j, 1] - 0)<20 and abs(birdeye[i, j, 0] - 255)<20:
-            roadmap[i, j, :] = birdeye[i, j, :]
+    roadmap_render_types = ['roadmap']
+    if self.display_route:
+      roadmap_render_types.append('waypoints')
+    self.birdeye_render.render(self.display, roadmap_render_types)
+    roadmap = pygame.surfarray.array3d(self.display)
+    roadmap = roadmap[0:self.display_size, :, :]
+    roadmap = display_to_rgb(roadmap, self.obs_size)
+    # Add ego vehicle
+    for i in range(self.obs_size):
+      for j in range(self.obs_size):
+        if abs(birdeye[i, j, 0] - 255)<20 and abs(birdeye[i, j, 1] - 0)<20 and abs(birdeye[i, j, 0] - 255)<20:
+          roadmap[i, j, :] = birdeye[i, j, :]
 
     # Display birdeye image
     birdeye_surface = rgb_to_display_surface(birdeye, self.display_size)
@@ -583,15 +583,30 @@ class CarlaEnv(gym.Env):
       'lidar':lidar.astype(np.uint8),
       'birdeye':birdeye.astype(np.uint8),
       'state': state,
+      'roadmap':roadmap.astype(np.uint8),
     }
 
     if self.pixor:
       obs.update({
-        'roadmap':roadmap.astype(np.uint8),
         'vh_clas':np.expand_dims(vh_clas, -1).astype(np.float32),
         'vh_regr':vh_regr.astype(np.float32),
         'pixor_state': pixor_state,
       })
+
+    R = np.array([[np.cos(ego_yaw), np.sin(ego_yaw)], 
+      [-np.sin(ego_yaw), np.cos(ego_yaw)]])
+    waypt = np.array(self.waypoints)  # [n,3]
+    waypt_xy_local = R.dot((waypt[:,:2]-[ego_x,ego_y]).T).T  # [n,2]
+    waypt_yaw_local = waypt[:,2]/180*np.pi - ego_yaw
+    waypt_tx = np.cos(waypt_yaw_local)
+    waypt_ty = np.sin(waypt_yaw_local)
+    way_pt_local = np.concatenate((waypt_xy_local, np.expand_dims(waypt_tx,1), np.expand_dims(waypt_ty,1)),1)  # [n,4]
+    # way_pt_local = np.concatenate((waypt_xy_local, np.expand_dims(waypt_yaw_local,1)),1)  # [n,3]
+
+    # print(self.waypoints)
+    obs.update({
+      'waypoints':way_pt_local.astype(np.float32),
+    })
 
     return obs
 
