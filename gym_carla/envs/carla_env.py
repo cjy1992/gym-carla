@@ -13,6 +13,8 @@ import pygame
 import random
 import time
 from skimage.transform import resize
+import logging
+logger = logging.getLogger('carla_env')
 
 import gym
 from gym import spaces
@@ -51,6 +53,12 @@ class CarlaEnv(gym.Env):
     else:
       self.pixor = False
 
+    if 'graph' in params.keys():
+      self.graph = params['graph']
+      self.graph_size = params['graph_size']
+    else:
+      self.graph = False
+
     # Destination
     if params['task_mode'] == 'roundabout':
       self.dests = [[4.46, -61.46, 0], [-49.53, -2.89, 0], [-6.48, 55.47, 0], [35.96, 3.33, 0]]
@@ -74,21 +82,30 @@ class CarlaEnv(gym.Env):
       'birdeye': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
       'state': spaces.Box(np.array([-2, -1, -5, 0]), np.array([2, 1, 30, 1]), dtype=np.float32)
       }
+    if self.pixor or self.graph:
+      observation_space_dict.update({
+        'roadmap': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8)
+      })
     if self.pixor:
       observation_space_dict.update({
-        'roadmap': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
         'vh_clas': spaces.Box(low=0, high=1, shape=(self.pixor_size, self.pixor_size, 1), dtype=np.float32),
         'vh_regr': spaces.Box(low=-5, high=5, shape=(self.pixor_size, self.pixor_size, 6), dtype=np.float32),
         'pixor_state': spaces.Box(np.array([-1000, -1000, -1, -1, -5]), np.array([1000, 1000, 1, 1, 20]), dtype=np.float32)
         })
+    if self.graph:
+      observation_space_dict.update({
+        'graph_state': spaces.Box(low=-1, high=1, shape=(self.graph_size*4,), dtype=np.float32),
+        'graph_dict': spaces.Box(low=-1, high=1, shape=(self.graph_size*4,), dtype=np.float32),
+        'globals': spaces.Box(np.array([-2, -1, -5]), np.array([2, 1, 30]), dtype=np.float32)
+      })
     self.observation_space = spaces.Dict(observation_space_dict)
 
     # Connect to carla server and get world object
-    print('connecting to Carla server...')
+    logger.info('connecting to Carla server...')
     client = carla.Client('localhost', params['port'])
     client.set_timeout(10.0)
     self.world = client.load_world(params['town'])
-    print('Carla server connected!')
+    logger.info('Carla server connected!')
 
     # Set weather
     self.world.set_weather(carla.WeatherParameters.ClearNoon)
@@ -470,21 +487,6 @@ class CarlaEnv(gym.Env):
     birdeye = birdeye[0:self.display_size, :, :]
     birdeye = display_to_rgb(birdeye, self.obs_size)
 
-    # Roadmap
-    if self.pixor:
-      roadmap_render_types = ['roadmap']
-      if self.display_route:
-        roadmap_render_types.append('waypoints')
-      self.birdeye_render.render(self.display, roadmap_render_types)
-      roadmap = pygame.surfarray.array3d(self.display)
-      roadmap = roadmap[0:self.display_size, :, :]
-      roadmap = display_to_rgb(roadmap, self.obs_size)
-      # Add ego vehicle
-      for i in range(self.obs_size):
-        for j in range(self.obs_size):
-          if abs(birdeye[i, j, 0] - 255)<20 and abs(birdeye[i, j, 1] - 0)<20 and abs(birdeye[i, j, 0] - 255)<20:
-            roadmap[i, j, :] = birdeye[i, j, :]
-
     # Display birdeye image
     birdeye_surface = rgb_to_display_surface(birdeye, self.display_size)
     self.display.blit(birdeye_surface, (0, 0))
@@ -541,6 +543,28 @@ class CarlaEnv(gym.Env):
     v = self.ego.get_velocity()
     speed = np.sqrt(v.x**2 + v.y**2)
     state = np.array([lateral_dis, - delta_yaw, speed, self.vehicle_front])
+    obs = {
+      'camera': camera.astype(np.uint8),
+      'lidar': lidar.astype(np.uint8),
+      'birdeye': birdeye.astype(np.uint8),
+      'state': state,
+    }
+
+    # Roadmap
+    if self.pixor or self.graph:
+      roadmap_render_types = ['roadmap']
+      if self.display_route:
+        roadmap_render_types.append('waypoints')
+      self.birdeye_render.render(self.display, roadmap_render_types)
+      roadmap = pygame.surfarray.array3d(self.display)
+      roadmap = roadmap[0:self.display_size, :, :]
+      roadmap = display_to_rgb(roadmap, self.obs_size)
+      # Add ego vehicle
+      for i in range(self.obs_size):
+        for j in range(self.obs_size):
+          if abs(birdeye[i, j, 0] - 255)<20 and abs(birdeye[i, j, 1])<20 and abs(birdeye[i, j, 2])<20:
+            roadmap[i, j, :] = birdeye[i, j, :]
+      obs.update({'roadmap': roadmap.astype(np.uint8)})
 
     if self.pixor:
       ## Vehicle classification and regression maps (requires further normalization)
@@ -577,20 +601,49 @@ class CarlaEnv(gym.Env):
 
       # Pixor state, [x, y, cos(yaw), sin(yaw), speed]
       pixor_state = [ego_x, ego_y, np.cos(ego_yaw), np.sin(ego_yaw), speed]
-
-    obs = {
-      'camera':camera.astype(np.uint8),
-      'lidar':lidar.astype(np.uint8),
-      'birdeye':birdeye.astype(np.uint8),
-      'state': state,
-    }
-
-    if self.pixor:
       obs.update({
-        'roadmap':roadmap.astype(np.uint8),
-        'vh_clas':np.expand_dims(vh_clas, -1).astype(np.float32),
-        'vh_regr':vh_regr.astype(np.float32),
+        'vh_clas': np.expand_dims(vh_clas, -1).astype(np.float32),
+        'vh_regr': vh_regr.astype(np.float32),
         'pixor_state': pixor_state,
+      })
+
+    if self.graph:
+      graph_state = np.zeros(self.graph_size*4)
+      globals = [lateral_dis, - delta_yaw, speed]
+      nodes = [[0, 0, 1, 0]]
+      edges = []
+      senders = []
+      receivers = []
+      idx = 1
+      for actor in self.world.get_actors().filter('vehicle.*'):
+        x, y, yaw, l, w = get_info(actor)
+        x_local, y_local, yaw_local = get_local_pose((x, y, yaw), (ego_x, ego_y, ego_yaw))
+        if actor.id == self.ego.id:
+          graph_state[0:4] = np.array([x_local/self.obs_range, y_local/self.obs_range,
+                                       np.cos(yaw_local), np.sin(yaw_local)])
+        elif abs(y_local) < self.obs_range/2 and -self.d_behind < x_local < self.obs_range-self.d_behind:
+          node = [x_local / self.obs_range, y_local / self.obs_range, np.cos(yaw_local), np.sin(yaw_local)]
+          nodes.append(node)
+          edges.append([1])
+          senders.append(idx)
+          receivers.append(0)
+          if idx < self.graph_size-1:
+            graph_state[idx*4:idx*4+4] = np.array(node)
+            idx += 1
+          else:
+            logger.warning('No enough space in graph_state, consider increase graph_size')
+
+      graph_dict = {
+        "globals": globals,
+        "nodes": nodes,
+        "edges": edges,
+        "senders": senders,
+        "receivers": receivers
+      }
+      obs.update({
+        'graph_state': graph_state,
+        'graph_dict': graph_dict,
+        'globals': globals
       })
 
     return obs

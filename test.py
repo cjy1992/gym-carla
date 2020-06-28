@@ -37,6 +37,8 @@ def main():
     'display_route': True,  # whether to render the desired route
     'pixor_size': 64,  # size of the pixor labels
     'pixor': False,  # whether to output PIXOR observation
+    'graph_size': 6,  # max number of the graph vertices
+    'graph': True,  # whether to output graph representation
   }
 
   # Set gym-carla environment
