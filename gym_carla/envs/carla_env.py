@@ -130,7 +130,7 @@ class CarlaEnv(gym.Env):
 
     # Lidar sensor
     self.lidar_data = None
-    self.lidar_height = 2.1
+    self.lidar_height = 3.5
     self.lidar_trans = carla.Transform(carla.Location(x=0.0, z=self.lidar_height))
     self.lidar_bp = self.world.get_blueprint_library().find('sensor.lidar.ray_cast')
     self.lidar_bp.set_attribute('channels', '32')
@@ -504,11 +504,12 @@ class CarlaEnv(gym.Env):
     z_bins = [-self.lidar_height-1, -self.lidar_height+0.25, 1]
     # Get lidar image according to the bins
     lidar, _ = np.histogramdd(point_cloud, bins=(x_bins, y_bins, z_bins))
-    lidar[:,:,0] = np.array(lidar[:,:,0]>0, dtype=np.uint8)
+    lidar[:,:,0] = np.zeros(shape=lidar[:,:,0].shape)
     lidar[:,:,1] = np.array(lidar[:,:,1]>0, dtype=np.uint8)
     # Add the waypoints to lidar image
     if self.display_route:
-      wayptimg = (birdeye[:,:,0] <= 10) * (birdeye[:,:,1] <= 10) * (birdeye[:,:,2] >= 240)
+      #wayptimg = (birdeye[:,:,0] <= 10) * (birdeye[:,:,1] <= 10) * (birdeye[:,:,2] >= 240)
+      wayptimg = birdeye[:, :, 0] < 0
     else:
       wayptimg = birdeye[:,:,0] < 0  # Equal to a zero matrix
     wayptimg = np.expand_dims(wayptimg, axis=2)
