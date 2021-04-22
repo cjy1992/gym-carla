@@ -24,8 +24,8 @@ def main():
     'continuous_steer_range': [-0.3, 0.3],  # continuous steering angle range
     'ego_vehicle_filter': 'vehicle.lincoln*',  # filter for defining ego vehicle
     'port': 2000,  # connection port
-    'town': 'Town03',  # which town to simulate
-    'task_mode': 'random',  # mode of the task, [random, roundabout (only for Town03)]
+    'town': 'Town06',  # which town to simulate
+    'task_mode': 'acc_1',  # mode of the task, [random, roundabout (only for Town03)]
     'max_time_episode': 1000,  # maximum timesteps per episode
     'max_waypt': 12,  # maximum number of waypoints
     'obs_range': 32,  # observation range (meter)

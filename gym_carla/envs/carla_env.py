@@ -173,17 +173,17 @@ class CarlaEnv(gym.Env):
         count -= 1
 
     # Spawn pedestrians
-    random.shuffle(self.walker_spawn_points)
-    count = self.number_of_walkers
-    if count > 0:
-      for spawn_point in self.walker_spawn_points:
-        if self._try_spawn_random_walker_at(spawn_point):
-          count -= 1
-        if count <= 0:
-          break
-    while count > 0:
-      if self._try_spawn_random_walker_at(random.choice(self.walker_spawn_points)):
-        count -= 1
+    # random.shuffle(self.walker_spawn_points)
+    # count = self.number_of_walkers
+    # if count > 0:
+    #   for spawn_point in self.walker_spawn_points:
+    #     if self._try_spawn_random_walker_at(spawn_point):
+    #       count -= 1
+    #     if count <= 0:
+    #       break
+    # while count > 0:
+    #   if self._try_spawn_random_walker_at(random.choice(self.walker_spawn_points)):
+    #     count -= 1
 
     # Get actors polygon list
     self.vehicle_polygons = []
@@ -199,15 +199,21 @@ class CarlaEnv(gym.Env):
       if ego_spawn_times > self.max_ego_spawn_times:
         self.reset()
 
-      if self.task_mode == 'random':
+      # if self.task_mode == 'random':
+      #   transform = random.choice(self.vehicle_spawn_points)
+      # if self.task_mode == 'roundabout':
+      #   self.start=[52.1+np.random.uniform(-5,5),-4.2, 178.66] # random
+      #   # self.start=[52.1,-4.2, 178.66] # static
+      #   transform = set_carla_transform(self.start)
+
+      if self.task_mode == 'acc_1':
+        #self.start = [565.6,-20.8,1]
+        #transform = set_carla_transform(self.start)
         transform = random.choice(self.vehicle_spawn_points)
-      if self.task_mode == 'roundabout':
-        self.start=[52.1+np.random.uniform(-5,5),-4.2, 178.66] # random
-        # self.start=[52.1,-4.2, 178.66] # static
-        transform = set_carla_transform(self.start)
       if self._try_spawn_ego_vehicle_at(transform):
         break
       else:
+        print('trying to spawn')
         ego_spawn_times += 1
         time.sleep(0.1)
 
