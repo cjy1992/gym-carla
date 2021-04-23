@@ -52,8 +52,8 @@ class CarlaEnv(gym.Env):
       self.pixor = False
 
     # Destination
-    if params['task_mode'] == 'roundabout':
-      self.dests = [[4.46, -61.46, 0], [-49.53, -2.89, 0], [-6.48, 55.47, 0], [35.96, 3.33, 0]]
+    if params['task_mode'] == 'acc_1':
+      self.dests = [[592.1,244.7,0]] # stopping condition in Town 06
     else:
       self.dests = None
 
@@ -85,14 +85,14 @@ class CarlaEnv(gym.Env):
 
     # Connect to carla server and get world object
     print('connecting to Carla server...')
-    client = carla.Client('localhost', params['port'])
-    client.set_timeout(10.0)
-    self.world = client.load_world(params['town'])
+    self.client = carla.Client('localhost', params['port'])
+    self.client.set_timeout(10.0)
+    self.world = self.client.load_world(params['town'])
     print('Carla server connected!')
     self.map = self.world.get_map()
-    self.tm = client.get_trafficmanager(params['port'])
+    self.tm = self.client.get_trafficmanager(int(8000))
     self.tm_port = self.tm.get_port()
-    print('Traffic Manager Port ' + self.tm_port)
+    #print('Traffic Manager Port ' + self.tm_port)
     # Set weather
     self.world.set_weather(carla.WeatherParameters.ClearNoon)
 
@@ -218,8 +218,6 @@ class CarlaEnv(gym.Env):
         transform.location.z += 2.0
         # transform = random.choice(self.vehicle_spawn_points)
       if self._try_spawn_ego_vehicle_at(transform):
-        print('setting autopilot to true')
-        self.ego.set_autopilot(True,self.tm_port)
         break
       else:
         print('trying to spawn %d' % ego_spawn_times)
@@ -437,6 +435,12 @@ class CarlaEnv(gym.Env):
 
     if vehicle is not None:
       self.ego=vehicle
+
+      batch = []
+      batch.append(carla.command.SetAutopilot(self.ego,True))
+      self.client.apply_batch_sync(batch)
+
+
       return True
     print ('could not spawn vehicle')
     return False
