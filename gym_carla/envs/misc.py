@@ -249,3 +249,5 @@ def rgb_to_display_surface(rgb, display_size):
   pygame.surfarray.blit_array(surface, display)
   return surface
 
+def get_waypoint_for_ego_spawn(road_id,lane_id,s,map):
+  return map.get_waypoint_xodr(road_id,lane_id,s=0)

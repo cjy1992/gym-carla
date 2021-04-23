@@ -89,7 +89,10 @@ class CarlaEnv(gym.Env):
     client.set_timeout(10.0)
     self.world = client.load_world(params['town'])
     print('Carla server connected!')
-
+    self.map = self.world.get_map()
+    self.tm = client.get_trafficmanager(params['port'])
+    self.tm_port = self.tm.get_port()
+    print('Traffic Manager Port ' + self.tm_port)
     # Set weather
     self.world.set_weather(carla.WeatherParameters.ClearNoon)
 
@@ -207,13 +210,19 @@ class CarlaEnv(gym.Env):
       #   transform = set_carla_transform(self.start)
 
       if self.task_mode == 'acc_1':
-        #self.start = [565.6,-20.8,1]
+        #location = carla.Location(x=21.2,y=52.4,z=0.0)
         #transform = set_carla_transform(self.start)
-        transform = random.choice(self.vehicle_spawn_points)
+        #wpt1 = self.map.get_waypoint(location,project_to_road=True,lane_type=carla.LaneType.Driving)
+        wpt1 = get_waypoint_for_ego_spawn(road_id=39,lane_id=-5,s=0,map=self.map)
+        transform = wpt1.transform
+        transform.location.z += 2.0
+        # transform = random.choice(self.vehicle_spawn_points)
       if self._try_spawn_ego_vehicle_at(transform):
+        print('setting autopilot to true')
+        self.ego.set_autopilot(True,self.tm_port)
         break
       else:
-        print('trying to spawn')
+        print('trying to spawn %d' % ego_spawn_times)
         ego_spawn_times += 1
         time.sleep(0.1)
 
@@ -279,7 +288,7 @@ class CarlaEnv(gym.Env):
 
     # Apply control
     act = carla.VehicleControl(throttle=float(throttle), steer=float(-steer), brake=float(brake))
-    self.ego.apply_control(act)
+    #self.ego.apply_control(act)
 
     self.world.tick()
 
@@ -420,6 +429,7 @@ class CarlaEnv(gym.Env):
         continue
       else:
         overlap = True
+        print('overlapping vehicle when trying to spawn')
         break
 
     if not overlap:
@@ -428,7 +438,7 @@ class CarlaEnv(gym.Env):
     if vehicle is not None:
       self.ego=vehicle
       return True
-      
+    print ('could not spawn vehicle')
     return False
 
   def _get_actor_polygons(self, filt):
