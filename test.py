@@ -48,14 +48,12 @@ def main():
 
             fps = 1 / (time.time() - start)
             sys.stdout.write("\r")
-            sys.stdout.write(f"[{fps:.0f} fps] Road option: {info['road_option']}, r: {r:.2f}, "
-                             f"pos: {state[4]:.2f}, ori: {state[5]:.2f}"
-                             f", lateral dis: {state[0]:.2f}, delta yaw: {state[1]:.2f}")
+            sys.stdout.write(f"[{fps:.1f} fps]")
             sys.stdout.flush()
 
-            # cv2.imshow('camera', obs['camera'])
-            # cv2.imshow('depth', obs['depth'])
-            # cv2.waitKey(1)
+            cv2.imshow('camera', obs['camera'])
+            cv2.imshow('depth', obs['depth'])
+            cv2.waitKey(1)
 
             if done:
                 obs = env.reset()

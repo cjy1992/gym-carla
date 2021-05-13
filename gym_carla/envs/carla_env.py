@@ -60,9 +60,11 @@ class CarlaEnv(gym.Env):
 
         # Connect to carla server and get world object
         print('connecting to Carla server...')
-        client = carla.Client('localhost', params['port'])
-        client.set_timeout(10.0)
-        self.world = client.load_world(params['town'])
+        self.town = params['town']
+        self.client = carla.Client('localhost', params['port'])
+        self.client.set_timeout(10.0)
+        self.world = self.client.load_world(params['town'])
+        self.map = self.world.get_map()
         print('Carla server connected!')
 
         # Set weather
@@ -79,7 +81,7 @@ class CarlaEnv(gym.Env):
                 self.walker_spawn_points.append(spawn_point)
 
         # Create the ego vehicle blueprint
-        self.ego_bp = self._create_vehicle_bluepprint(params['ego_vehicle_filter'], color='49,8,8')
+        self.ego_bp = self._create_vehicle_blueprint(params['ego_vehicle_filter'], color='49,8,8')
 
         # Collision sensor
         self.collision_hist = []  # The collision history
@@ -119,9 +121,13 @@ class CarlaEnv(gym.Env):
         self.lidar_sensor = None
         self.camera_sensor = None
 
+        # hard reset
+        self.world = self.client.load_world(self.town)
+
         # Delete sensors, vehicles and walkers
         self._clear_all_actors(['sensor.other.collision', 'sensor.lidar.ray_cast', 'sensor.camera.rgb', 'vehicle.*',
                                 'controller.ai.walker', 'walker.*'])
+
 
         # Disable sync mode
         self._set_synchronous_mode(False)
@@ -279,7 +285,7 @@ class CarlaEnv(gym.Env):
     def render(self, mode):
         pass
 
-    def _create_vehicle_bluepprint(self, actor_filter, color=None, number_of_wheels=[4]):
+    def _create_vehicle_blueprint(self, actor_filter, color=None, number_of_wheels=[4]):
         """Create the blueprint for a specific actor type.
 
         Args:
@@ -315,7 +321,7 @@ class CarlaEnv(gym.Env):
         Returns:
           Bool indicating whether the spawn is successful.
         """
-        blueprint = self._create_vehicle_bluepprint('vehicle.*', number_of_wheels=number_of_wheels)
+        blueprint = self._create_vehicle_blueprint('vehicle.*', number_of_wheels=number_of_wheels)
         blueprint.set_attribute('role_name', 'autopilot')
         vehicle = self.world.try_spawn_actor(blueprint, transform)
         if vehicle:
@@ -419,9 +425,9 @@ class CarlaEnv(gym.Env):
         delta_yaw = np.arcsin(np.cross(w, np.array(np.array([np.cos(ego_yaw), np.sin(ego_yaw)]))))
         v = self.ego.get_velocity()
         speed = np.sqrt(v.x ** 2 + v.y ** 2)
-        vehicle_position = get_vehicle_position(self.world.get_map(), self.ego)
-        vehicle_orientation = get_vehicle_orientation(self.world.get_map(), self.ego)
-        state = np.array([lateral_dis, - delta_yaw, speed, self.vehicle_front, vehicle_position, vehicle_orientation])
+        # vehicle_position = get_vehicle_position(self.map, self.ego)
+        # vehicle_orientation = get_vehicle_orientation(self.map, self.ego)
+        state = np.array([lateral_dis, - delta_yaw, speed, self.vehicle_front])
 
         obs = {
             'camera': self.camera_img,
