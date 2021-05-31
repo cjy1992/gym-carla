@@ -30,6 +30,7 @@ def main():
         'd_behind': 12,  # distance behind the ego vehicle (meter)
         'out_lane_thres': 2.0,  # threshold for out of lane
         'desired_speed': 6,  # desired speed (m/s)
+        'reduction_at_intersection': 0.75,
         'max_ego_spawn_times': 200,  # maximum times to spawn ego vehicle
     }
     import gym_carla

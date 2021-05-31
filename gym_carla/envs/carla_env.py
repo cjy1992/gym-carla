@@ -29,20 +29,17 @@ class CarlaEnv(gym.Env):
         self.number_of_vehicles = params['number_of_vehicles']
         self.number_of_walkers = params['number_of_walkers']
         self.dt = params['dt']
-        self.task_mode = params['task_mode']
         self.max_time_episode = params['max_time_episode']
         self.max_waypt = params['max_waypt']
         self.d_behind = params['d_behind']
         self.obs_size = 288
         self.out_lane_thres = params['out_lane_thres']
         self.desired_speed = params['desired_speed']
+        self.speed_reduction_at_intersection = params['reduction_at_intersection']
         self.max_ego_spawn_times = params['max_ego_spawn_times']
 
         # Destination
-        if params['task_mode'] == 'roundabout':
-            self.dests = [[4.46, -61.46, 0], [-49.53, -2.89, 0], [-6.48, 55.47, 0], [35.96, 3.33, 0]]
-        else:
-            self.dests = None
+        self.dests = None
 
         # action and observation spaces
         self.action_space = spaces.Box(np.array([params['continuous_accel_range'][0],
@@ -53,7 +50,7 @@ class CarlaEnv(gym.Env):
         observation_space_dict = {
             'camera': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
             'depth': spaces.Box(low=0, high=1000, shape=(self.obs_size, self.obs_size, 3), dtype=np.float32),
-            'state': spaces.Box(np.array([-2, -1, -5, 0]), np.array([2, 1, 30, 1]), dtype=np.float32)
+            'state': spaces.Box(np.array([-50, -50, 0]), np.array([50, 50, 4]), dtype=np.float32)
         }
 
         self.observation_space = spaces.Dict(observation_space_dict)
@@ -125,8 +122,12 @@ class CarlaEnv(gym.Env):
         self.world = self.client.load_world(self.town)
 
         # Delete sensors, vehicles and walkers
-        self._clear_all_actors(['sensor.other.collision', 'sensor.lidar.ray_cast', 'sensor.camera.rgb', 'vehicle.*',
-                                'controller.ai.walker', 'walker.*'])
+        self._clear_all_actors(['sensor.other.collision',
+                                'sensor.lidar.ray_cast',
+                                'sensor.camera.rgb',
+                                'vehicle.*',
+                                'controller.ai.walker',
+                                'walker.*'])
 
 
         # Disable sync mode
@@ -172,12 +173,7 @@ class CarlaEnv(gym.Env):
             if ego_spawn_times > self.max_ego_spawn_times:
                 self.reset()
 
-            if self.task_mode == 'random':
-                transform = random.choice(self.vehicle_spawn_points)
-            if self.task_mode == 'roundabout':
-                self.start = [52.1 + np.random.uniform(-5, 5), -4.2, 178.66]  # random
-                # self.start=[52.1,-4.2, 178.66] # static
-                transform = set_carla_transform(self.start)
+            transform = random.choice(self.vehicle_spawn_points)
             if self._try_spawn_ego_vehicle_at(transform):
                 break
             else:
@@ -189,13 +185,18 @@ class CarlaEnv(gym.Env):
         self.collision_sensor.listen(lambda event: get_collision_hist(event))
 
         def get_collision_hist(event):
-            impulse = event.normal_impulse
-            intensity = np.sqrt(impulse.x ** 2 + impulse.y ** 2 + impulse.z ** 2)
-            self.collision_hist.append(intensity)
-            if len(self.collision_hist) > self.collision_hist_l:
-                self.collision_hist.pop(0)
+            # impulse = event.normal_impulse
+            # intensity = np.sqrt(impulse.x ** 2 + impulse.y ** 2 + impulse.z ** 2)
+            # self.collision_hist.append(intensity)
+            self.collision_info = {
+                "frame": event.frame,
+                "other_actor": event.other_actor.type_id,
+            }
 
-        self.collision_hist = []
+            # if len(self.collision_hist) > self.collision_hist_l:
+                # self.collision_hist.pop(0)
+
+        self.collision_info = None
 
         # Add camera sensor
         self.camera_sensor = self.world.spawn_actor(self.camera_bp, self.camera_trans, attach_to=self.ego)
@@ -276,7 +277,7 @@ class CarlaEnv(gym.Env):
         self.time_step += 1
         self.total_step += 1
 
-        return self._get_obs(), self._get_reward(), self._terminal(), copy.deepcopy(info)
+        return self._get_obs(), self._get_reward(act), self._terminal(), copy.deepcopy(info)
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
@@ -420,61 +421,87 @@ class CarlaEnv(gym.Env):
         ego_trans = self.ego.get_transform()
         ego_x = ego_trans.location.x
         ego_y = ego_trans.location.y
-        ego_yaw = ego_trans.rotation.yaw / 180 * np.pi
-        lateral_dis, w = get_preview_lane_dis(self.waypoints, ego_x, ego_y)
-        delta_yaw = np.arcsin(np.cross(w, np.array(np.array([np.cos(ego_yaw), np.sin(ego_yaw)]))))
+        # ego_yaw = ego_trans.rotation.yaw / 180 * np.pi
+        # lateral_dis, w = get_preview_lane_dis(self.waypoints, ego_x, ego_y)
+        # delta_yaw = np.arcsin(np.cross(w, np.array(np.array([np.cos(ego_yaw), np.sin(ego_yaw)]))))
         v = self.ego.get_velocity()
-        speed = np.sqrt(v.x ** 2 + v.y ** 2)
         # vehicle_position = get_vehicle_position(self.map, self.ego)
         # vehicle_orientation = get_vehicle_orientation(self.map, self.ego)
-        state = np.array([lateral_dis, - delta_yaw, speed, self.vehicle_front])
+        state = np.array([v.x, v.y, int(self.road_option.value)])
 
         obs = {
             'camera': self.camera_img,
             'depth': self.depth_array,
-            'state': state,
+            'state': state
         }
 
         return obs
 
-    def _get_reward(self):
+    def _get_reward(self, control):
         """Calculate the step reward."""
 
-        # reward for speed tracking
+        steer = control.steer
+        command = self.road_option.name
         v = self.ego.get_velocity()
+        collision = self.collision_info
         speed = np.sqrt(v.x ** 2 + v.y ** 2)
-        r_speed = -abs(speed - self.desired_speed)
+        distance = get_vehicle_position(self.map, self.ego)
+        speed_red = self.speed_reduction_at_intersection
 
-        # reward for collision
-        r_collision = 0
-        if len(self.collision_hist) > 0:
-            r_collision = -1
+        # speed and steer behavior
+        if command in ['RIGHT', 'LEFT']:
+            r_a = 2 - np.abs(speed_red * self.desired_speed - speed) / speed_red * self.desired_speed
+            is_opposite = steer > 0 and command == 'LEFT' or steer < 0 and command == 'RIGHT'
+            r_a -= steer ** 2 if is_opposite else 0
+        elif command == 'STRAIGHT':
+            r_a = 1 - np.abs(speed_red * self.desired_speed - speed) / speed_red * self.desired_speed
+        # follow lane
+        else:
+            r_a = 2 - np.abs(self.desired_speed - speed) / self.desired_speed
 
-        # reward for steering:
-        r_steer = -self.ego.get_control().steer ** 2
+        # collision
+        r_c = 0
+        if collision:
+            r_c = -5
+            if str(collision['other_actor']).startswith('vehicle'):
+                r_c = -10
 
-        # reward for out of lane
-        ego_x, ego_y = get_pos(self.ego)
-        dis, w = get_lane_dis(self.waypoints, ego_x, ego_y)
-        r_out = 0
-        if abs(dis) > self.out_lane_thres:
-            r_out = -1
+        # distance to center
+        r_dist = - distance / 2
+        return r_a + r_c + r_dist
 
-        # longitudinal speed
-        lspeed = np.array([v.x, v.y])
-        lspeed_lon = np.dot(lspeed, w)
+        # # reward for speed tracking
 
-        # cost for too fast
-        r_fast = 0
-        if lspeed_lon > self.desired_speed:
-            r_fast = -1
-
-        # cost for lateral acceleration
-        r_lat = - abs(self.ego.get_control().steer) * lspeed_lon ** 2
-
-        r = 200 * r_collision + 1 * lspeed_lon + 10 * r_fast + 1 * r_out + r_steer * 5 + 0.2 * r_lat - 0.1
-
-        return r
+        # r_speed = -abs(speed - self.desired_speed)
+        #
+        # # reward for collision
+        # r_collision = 0
+        # if len(self.collision_hist) > 0:
+        #     r_collision = -1
+        #
+        # # reward for steering:
+        # r_steer = -self.ego.get_control().steer ** 2
+        #
+        # # reward for out of lane
+        # ego_x, ego_y = get_pos(self.ego)
+        # dis, w = get_lane_dis(self.waypoints, ego_x, ego_y)
+        # r_out = 0
+        # if abs(dis) > self.out_lane_thres:
+        #     r_out = -1
+        #
+        # # longitudinal speed
+        # lspeed = np.array([v.x, v.y])
+        # lspeed_lon = np.dot(lspeed, w)
+        #
+        # # cost for too fast
+        # r_fast = 0
+        # if lspeed_lon > self.desired_speed:
+        #     r_fast = -1
+        #
+        # # cost for lateral acceleration
+        # r_lat = - abs(self.ego.get_control().steer) * lspeed_lon ** 2
+        #
+        # r = 200 * r_collision + 1 * lspeed_lon + 10 * r_fast + 1 * r_out + r_steer * 5 + 0.2 * r_lat - 0.1
 
     def _terminal(self):
         """Calculate whether to terminate the current episode."""
