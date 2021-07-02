@@ -17,7 +17,7 @@ def main():
         'town': 'Town03',  # which town to simulate
 
         # simulation parameters
-        'verbose': True,
+        'verbose': False,
         'vehicles': 100,  # number of vehicles in the simulation
         'walkers': 0,     # number of walkers in the simulation
         'obs_size': 288,  # sensor width and height
@@ -47,7 +47,7 @@ def main():
 
             fps = 1 / (time.time() - start)
             sys.stdout.write("\r")
-            sys.stdout.write(f"[{fps:.1f} fps]")
+            sys.stdout.write(f"[{fps:.1f} fps] rew={r:.2f}")
             sys.stdout.flush()
 
             cv2.imshow('camera', obs['camera'])
