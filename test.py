@@ -18,9 +18,9 @@ def main():
         'number_of_walkers': 0,
         'display_size': 256,  # screen size of bird-eye render
         'max_past_step': 1,  # the number of past steps to draw
-        'dt': 0.05,  # time interval between two frames
-        'continuous_accel_range': [-3.0, 3.0],  # continuous acceleration range
-        'continuous_steer_range': [-0.3, 0.3],  # continuous steering angle range
+        'dt': 0.025,  # time interval between two frames
+        'continuous_accel_range': [-1.0, 1.0],  # continuous acceleration range
+        'continuous_steer_range': [-1.0, 1.0],  # continuous steering angle range
         'ego_vehicle_filter': 'vehicle.lincoln*',  # filter for defining ego vehicle
         'port': 2000,  # connection port
         'town': 'Town03',  # which town to simulate
@@ -33,10 +33,11 @@ def main():
         'reduction_at_intersection': 0.75,
         'max_ego_spawn_times': 200,  # maximum times to spawn ego vehicle
     }
-    import gym_carla
+    from gym_carla.envs.carla_env import CarlaEnv
 
     # Set gym-carla environment
-    env = gym.make('carla-v0', params=params)
+    # env = gym.make('carla-v0', params=params)
+    env = CarlaEnv(params)
     obs = env.reset()
 
     try:
@@ -45,7 +46,6 @@ def main():
             action = [2.0, 0.0]
             start = time.time()
             obs, r, done, info = env.step(action)
-            state = obs['state']
 
             fps = 1 / (time.time() - start)
             sys.stdout.write("\r")
@@ -53,7 +53,6 @@ def main():
             sys.stdout.flush()
 
             cv2.imshow('camera', obs['camera'])
-            cv2.imshow('depth', obs['depth'])
             cv2.waitKey(1)
 
             if done:

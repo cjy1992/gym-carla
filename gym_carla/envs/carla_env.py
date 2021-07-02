@@ -9,8 +9,9 @@ from __future__ import division
 
 import copy
 import random
+import sys
 import time
-from .vehicle_position import get_vehicle_position, get_vehicle_orientation
+from gym_carla.envs.vehicle_position import get_vehicle_position, get_vehicle_orientation
 
 import gym
 from gym import spaces
@@ -56,13 +57,15 @@ class CarlaEnv(gym.Env):
         self.observation_space = spaces.Dict(observation_space_dict)
 
         # Connect to carla server and get world object
-        print('connecting to Carla server...')
+        print('Connecting to Carla server...')
         self.town = params['town']
         self.client = carla.Client('localhost', params['port'])
         self.client.set_timeout(10.0)
         self.world = self.client.load_world(params['town'])
         self.map = self.world.get_map()
-        print('Carla server connected!')
+        self.tm = self.client.get_trafficmanager()
+        self.tm_port = self.tm.get_port()
+        print(f'Carla server connected at localhost:{params["port"]}!')
 
         # Set weather
         self.world.set_weather(carla.WeatherParameters.ClearNoon)
@@ -119,7 +122,7 @@ class CarlaEnv(gym.Env):
         self.camera_sensor = None
 
         # hard reset
-        self.world = self.client.load_world(self.town)
+        # self.world = self.client.load_world(self.town)
 
         # Delete sensors, vehicles and walkers
         self._clear_all_actors(['sensor.other.collision',
@@ -128,7 +131,6 @@ class CarlaEnv(gym.Env):
                                 'vehicle.*',
                                 'controller.ai.walker',
                                 'walker.*'])
-
 
         # Disable sync mode
         self._set_synchronous_mode(False)
@@ -159,17 +161,10 @@ class CarlaEnv(gym.Env):
             if self._try_spawn_random_walker_at(random.choice(self.walker_spawn_points)):
                 count -= 1
 
-        # Get actors polygon list
-        self.vehicle_polygons = []
-        vehicle_poly_dict = self._get_actor_polygons('vehicle.*')
-        self.vehicle_polygons.append(vehicle_poly_dict)
-        self.walker_polygons = []
-        walker_poly_dict = self._get_actor_polygons('walker.*')
-        self.walker_polygons.append(walker_poly_dict)
-
         # Spawn the ego vehicle
         ego_spawn_times = 0
         while True:
+
             if ego_spawn_times > self.max_ego_spawn_times:
                 self.reset()
 
@@ -180,21 +175,20 @@ class CarlaEnv(gym.Env):
                 ego_spawn_times += 1
                 time.sleep(0.1)
 
+            sys.stdout.write("\r")
+            sys.stdout.write(f"Trying to spawn ego vehicle: {ego_spawn_times}/{self.max_ego_spawn_times}")
+            sys.stdout.flush()
+
         # Add collision sensor
         self.collision_sensor = self.world.spawn_actor(self.collision_bp, carla.Transform(), attach_to=self.ego)
         self.collision_sensor.listen(lambda event: get_collision_hist(event))
 
         def get_collision_hist(event):
-            # impulse = event.normal_impulse
-            # intensity = np.sqrt(impulse.x ** 2 + impulse.y ** 2 + impulse.z ** 2)
-            # self.collision_hist.append(intensity)
             self.collision_info = {
                 "frame": event.frame,
                 "other_actor": event.other_actor.type_id,
             }
-
-            # if len(self.collision_hist) > self.collision_hist_l:
-                # self.collision_hist.pop(0)
+            self.collision_hist.append(event)
 
         self.collision_info = None
 
@@ -227,6 +221,7 @@ class CarlaEnv(gym.Env):
 
         # Enable sync mode
         self.settings.synchronous_mode = True
+        self.tm.set_synchronous_mode(True)
         self.world.apply_settings(self.settings)
 
         self.routeplanner = RoutePlanner(self.ego, self.max_waypt)
@@ -236,32 +231,22 @@ class CarlaEnv(gym.Env):
 
     def step(self, action: list):
 
-        # Calculate acceleration and steering
+        # Get acceleration and steering
         acc = action[0]
         steer = action[1]
 
         # Convert acceleration to throttle and brake
         if acc > 0:
-            throttle = np.clip(acc / 3, 0, 1)
+            throttle = np.clip(acc, 0, 1)
             brake = 0
         else:
             throttle = 0
-            brake = np.clip(-acc / 8, 0, 1)
+            brake = np.clip(-acc, 0, 1)
 
         # Apply control
         act = carla.VehicleControl(throttle=float(throttle), steer=float(-steer), brake=float(brake))
         self.ego.apply_control(act)
         self.world.tick()
-
-        # Append actors polygon list
-        vehicle_poly_dict = self._get_actor_polygons('vehicle.*')
-        self.vehicle_polygons.append(vehicle_poly_dict)
-        while len(self.vehicle_polygons) > self.max_past_step:
-            self.vehicle_polygons.pop(0)
-        walker_poly_dict = self._get_actor_polygons('walker.*')
-        self.walker_polygons.append(walker_poly_dict)
-        while len(self.walker_polygons) > self.max_past_step:
-            self.walker_polygons.pop(0)
 
         # route planner
         self.waypoints, _, self.vehicle_front, self.road_option = self.routeplanner.run_step()
@@ -283,10 +268,10 @@ class CarlaEnv(gym.Env):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 
-    def render(self, mode):
+    def render(self, mode='human'):
         pass
 
-    def _create_vehicle_blueprint(self, actor_filter, color=None, number_of_wheels=[4]):
+    def _create_vehicle_blueprint(self, actor_filter, color=None, number_of_wheels=None):
         """Create the blueprint for a specific actor type.
 
         Args:
@@ -295,6 +280,8 @@ class CarlaEnv(gym.Env):
         Returns:
           bp: the blueprint object of carla.
         """
+        if number_of_wheels is None:
+            number_of_wheels = [4]
         blueprints = self.world.get_blueprint_library().filter(actor_filter)
         blueprint_library = []
         for nw in number_of_wheels:
@@ -313,8 +300,8 @@ class CarlaEnv(gym.Env):
         self.settings.synchronous_mode = synchronous
         self.world.apply_settings(self.settings)
 
-    def _try_spawn_random_vehicle_at(self, transform, number_of_wheels=[4]):
-        """Try to spawn a surrounding vehicle at specific transform with random bluprint.
+    def _try_spawn_random_vehicle_at(self, transform, number_of_wheels=None):
+        """Try to spawn a surrounding vehicle at specific transform with random blueprint.
 
         Args:
           transform: the carla transform object.
@@ -322,16 +309,19 @@ class CarlaEnv(gym.Env):
         Returns:
           Bool indicating whether the spawn is successful.
         """
+        if number_of_wheels is None:
+            number_of_wheels = [4]
         blueprint = self._create_vehicle_blueprint('vehicle.*', number_of_wheels=number_of_wheels)
         blueprint.set_attribute('role_name', 'autopilot')
         vehicle = self.world.try_spawn_actor(blueprint, transform)
+
         if vehicle:
-            vehicle.set_autopilot(True)
+            vehicle.set_autopilot(True, self.tm_port)
             return True
         return False
 
     def _try_spawn_random_walker_at(self, transform):
-        """Try to spawn a walker at specific transform with random bluprint.
+        """Try to spawn a walker at specific transform with random blueprint.
 
         Args:
           transform: the carla transform object.
@@ -364,21 +354,7 @@ class CarlaEnv(gym.Env):
         Returns:
           Bool indicating whether the spawn is successful.
         """
-        vehicle = None
-        # Check if ego position overlaps with surrounding vehicles
-        overlap = False
-        for idx, poly in self.vehicle_polygons[-1].items():
-            poly_center = np.mean(poly, axis=0)
-            ego_center = np.array([transform.location.x, transform.location.y])
-            dis = np.linalg.norm(poly_center - ego_center)
-            if dis > 8:
-                continue
-            else:
-                overlap = True
-                break
-
-        if not overlap:
-            vehicle = self.world.try_spawn_actor(self.ego_bp, transform)
+        vehicle = self.world.try_spawn_actor(self.ego_bp, transform)
 
         if vehicle is not None:
             self.ego = vehicle
@@ -386,47 +362,10 @@ class CarlaEnv(gym.Env):
 
         return False
 
-    def _get_actor_polygons(self, filt):
-        """Get the bounding box polygon of actors.
-
-        Args:
-          filt: the filter indicating what type of actors we'll look at.
-
-        Returns:
-          actor_poly_dict: a dictionary containing the bounding boxes of specific actors.
-        """
-        actor_poly_dict = {}
-        for actor in self.world.get_actors().filter(filt):
-            # Get x, y and yaw of the actor
-            trans = actor.get_transform()
-            x = trans.location.x
-            y = trans.location.y
-            yaw = trans.rotation.yaw / 180 * np.pi
-            # Get length and width
-            bb = actor.bounding_box
-            l = bb.extent.x
-            w = bb.extent.y
-            # Get bounding box polygon in the actor's local coordinate
-            poly_local = np.array([[l, w], [l, -w], [-l, -w], [-l, w]]).transpose()
-            # Get rotation matrix to transform to global coordinate
-            R = np.array([[np.cos(yaw), -np.sin(yaw)], [np.sin(yaw), np.cos(yaw)]])
-            # Get global bounding box polygon
-            poly = np.matmul(R, poly_local).transpose() + np.repeat([[x, y]], 4, axis=0)
-            actor_poly_dict[actor.id] = poly
-        return actor_poly_dict
-
     def _get_obs(self):
         """Get the observations."""
         # State observation
-        ego_trans = self.ego.get_transform()
-        ego_x = ego_trans.location.x
-        ego_y = ego_trans.location.y
-        # ego_yaw = ego_trans.rotation.yaw / 180 * np.pi
-        # lateral_dis, w = get_preview_lane_dis(self.waypoints, ego_x, ego_y)
-        # delta_yaw = np.arcsin(np.cross(w, np.array(np.array([np.cos(ego_yaw), np.sin(ego_yaw)]))))
         v = self.ego.get_velocity()
-        # vehicle_position = get_vehicle_position(self.map, self.ego)
-        # vehicle_orientation = get_vehicle_orientation(self.map, self.ego)
         state = np.array([v.x, v.y, int(self.road_option.value)])
 
         obs = {
@@ -470,39 +409,6 @@ class CarlaEnv(gym.Env):
         r_dist = - distance / 2
         return r_a + r_c + r_dist
 
-        # # reward for speed tracking
-
-        # r_speed = -abs(speed - self.desired_speed)
-        #
-        # # reward for collision
-        # r_collision = 0
-        # if len(self.collision_hist) > 0:
-        #     r_collision = -1
-        #
-        # # reward for steering:
-        # r_steer = -self.ego.get_control().steer ** 2
-        #
-        # # reward for out of lane
-        # ego_x, ego_y = get_pos(self.ego)
-        # dis, w = get_lane_dis(self.waypoints, ego_x, ego_y)
-        # r_out = 0
-        # if abs(dis) > self.out_lane_thres:
-        #     r_out = -1
-        #
-        # # longitudinal speed
-        # lspeed = np.array([v.x, v.y])
-        # lspeed_lon = np.dot(lspeed, w)
-        #
-        # # cost for too fast
-        # r_fast = 0
-        # if lspeed_lon > self.desired_speed:
-        #     r_fast = -1
-        #
-        # # cost for lateral acceleration
-        # r_lat = - abs(self.ego.get_control().steer) * lspeed_lon ** 2
-        #
-        # r = 200 * r_collision + 1 * lspeed_lon + 10 * r_fast + 1 * r_out + r_steer * 5 + 0.2 * r_lat - 0.1
-
     def _terminal(self):
         """Calculate whether to terminate the current episode."""
         # Get ego state
@@ -520,11 +426,13 @@ class CarlaEnv(gym.Env):
         if self.dests is not None:  # If at destination
             for dest in self.dests:
                 if np.sqrt((ego_x - dest[0]) ** 2 + (ego_y - dest[1]) ** 2) < 4:
+                    print("reached destination")
                     return True
 
         # If out of lane
         dis, _ = get_lane_dis(self.waypoints, ego_x, ego_y)
         if abs(dis) > self.out_lane_thres:
+            print("out of lane")
             return True
 
         return False
