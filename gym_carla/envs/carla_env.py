@@ -1,10 +1,5 @@
 #!/usr/bin/env python
 
-# Copyright (c) 2019: Jianyu Chen (jianyuchen@berkeley.edu)
-#
-# This work is licensed under the terms of the MIT license.
-# For a copy, see <https://opensource.org/licenses/MIT>.
-
 from __future__ import division
 
 import copy
@@ -12,13 +7,16 @@ import random
 import sys
 import time
 from gym_carla.envs.vehicle_position import get_vehicle_position, get_vehicle_orientation
+from termcolor import colored
 
 import gym
 from gym import spaces
 from gym.utils import seeding
+from .listeners import get_collision_hist, get_camera_img, get_depth_img
 
 from gym_carla.envs.misc import *
 from gym_carla.envs.route_planner import RoutePlanner
+import weakref
 
 
 class CarlaEnv(gym.Env):
@@ -26,18 +24,20 @@ class CarlaEnv(gym.Env):
 
     def __init__(self, params):
         # parameters
-        self.max_past_step = params['max_past_step']
-        self.number_of_vehicles = params['number_of_vehicles']
-        self.number_of_walkers = params['number_of_walkers']
-        self.dt = params['dt']
-        self.max_time_episode = params['max_time_episode']
-        self.max_waypt = params['max_waypt']
-        self.d_behind = params['d_behind']
-        self.obs_size = 288
-        self.out_lane_thres = params['out_lane_thres']
-        self.desired_speed = params['desired_speed']
-        self.speed_reduction_at_intersection = params['reduction_at_intersection']
-        self.max_ego_spawn_times = params['max_ego_spawn_times']
+        # self.max_past_step = params['max_past_step']
+        # self.number_of_vehicles = params['number_of_vehicles']
+        # self.number_of_walkers = params['number_of_walkers']
+        # self.dt = params['dt']
+        # self.max_time_episode = params['max_time_episode']
+        # self.max_waypt = params['max_waypt']
+        # self.d_behind = params['d_behind']
+        # self.obs_size = 288
+        # self.out_lane_thres = params['out_lane_thres']
+        # self.desired_speed = params['desired_speed']
+        # self.speed_reduction_at_intersection = params['reduction_at_intersection']
+        # self.max_ego_spawn_times = params['max_ego_spawn_times']
+
+        self.config = params
 
         # Destination
         self.dests = None
@@ -49,185 +49,88 @@ class CarlaEnv(gym.Env):
                                                  params['continuous_steer_range'][1]]),
                                        dtype=np.float32)  # acc, steer
         observation_space_dict = {
-            'camera': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
-            'depth': spaces.Box(low=0, high=1000, shape=(self.obs_size, self.obs_size, 3), dtype=np.float32),
+            'camera': spaces.Box(low=0, high=255, shape=(self.config['obs_size'],
+                                                         self.config['obs_size'], 3), dtype=np.uint8),
+            'depth': spaces.Box(low=0, high=1000, shape=(self.config['obs_size'],
+                                                         self.config['obs_size'], 3), dtype=np.float32),
             'state': spaces.Box(np.array([-50, -50, 0]), np.array([50, 50, 4]), dtype=np.float32)
         }
 
         self.observation_space = spaces.Dict(observation_space_dict)
 
-        # Connect to carla server and get world object
-        print('Connecting to Carla server...')
-        self.town = params['town']
-        self.client = carla.Client('localhost', params['port'])
-        self.client.set_timeout(10.0)
-        self.world = self.client.load_world(params['town'])
+        print(colored("Connecting to CARLA...", "white"))
+        self.client = carla.Client(self.config['host'], self.config['port'])
+        self.client.set_timeout(20.0)
+        self.client.load_world(self.config['town'])
+        self.town = self.config['town']
+        self.world = self.client.get_world()
+        self.blueprint_library = self.world.get_blueprint_library()
+        self.settings = self.world.get_settings()
         self.map = self.world.get_map()
         self.tm = self.client.get_trafficmanager()
+        self.tm.set_synchronous_mode(True)
         self.tm_port = self.tm.get_port()
-        print(f'Carla server connected at localhost:{params["port"]}!')
+        print(colored(f"Successfully connected to CARLA at {self.config['host']}:{self.config['port']}", "green"))
 
-        # Set weather
-        self.world.set_weather(carla.WeatherParameters.ClearNoon)
+        self.sensor_width, self.sensor_height = self.config['obs_size'], self.config['obs_size']
+        self.fps = int(1 / self.config['dt'])
 
-        # Get spawn points
-        self.vehicle_spawn_points = list(self.world.get_map().get_spawn_points())
-        self.walker_spawn_points = []
-        for i in range(self.number_of_walkers):
-            spawn_point = carla.Transform()
-            loc = self.world.get_random_location_from_navigation()
-            if loc:
-                spawn_point.location = loc
-                self.walker_spawn_points.append(spawn_point)
-
-        # Create the ego vehicle blueprint
-        self.ego_bp = self._create_vehicle_blueprint(params['ego_vehicle_filter'], color='49,8,8')
-
-        # Collision sensor
-        self.collision_hist = []  # The collision history
-        self.collision_hist_l = 1  # collision history length
-        self.collision_bp = self.world.get_blueprint_library().find('sensor.other.collision')
-
-        # Camera sensor
-        self.camera_img = np.zeros((self.obs_size, self.obs_size, 3), dtype=np.uint8)
-        self.camera_trans = carla.Transform(carla.Location(x=1, z=2))
-        self.camera_bp = self.world.get_blueprint_library().find('sensor.camera.rgb')
-        # Modify the attributes of the blueprint to set image resolution and field of view.
-        self.camera_bp.set_attribute('image_size_x', str(self.obs_size))
-        self.camera_bp.set_attribute('image_size_y', str(self.obs_size))
-        self.camera_bp.set_attribute('fov', '110')
-        # Set the time in seconds between sensor captures
-        self.camera_bp.set_attribute('sensor_tick', '0.02')
-
-        # depth sensor
-        self.depth_array = np.zeros((self.obs_size, self.obs_size, 1), dtype=np.uint8)
-        self.depth_bp = self.world.get_blueprint_library().find('sensor.camera.depth')
-        self.depth_bp.set_attribute('image_size_x', str(self.obs_size))
-        self.depth_bp.set_attribute('image_size_y', str(self.obs_size))
-        self.depth_bp.set_attribute('fov', '110')
-        self.depth_bp.set_attribute('sensor_tick', '0.02')
-
-        # Set fixed simulation step for synchronous mode
-        self.settings = self.world.get_settings()
-        self.settings.fixed_delta_seconds = self.dt
-
-        # Record the time of total steps and resetting steps
-        self.reset_step = 0
+        # local state vars
+        self.ego = None
+        self.route_planner = None
+        self.waypoints = None
+        self.vehicle_front = None
+        self.road_option = None
+        self.camera_img = None
+        self.depth_array = None
+        self.time_step = 0
         self.total_step = 0
+        self.to_clean = {}
+        self.collision_info = {}
+        self.collision_hist = []
+
+    def set_weather(self, weather_option):
+        weather = carla.WeatherParameters(*weather_option)
+        self.world.set_weather(weather)
 
     def reset(self):
-        # Clear sensor objects
-        self.collision_sensor = None
-        self.lidar_sensor = None
-        self.camera_sensor = None
 
-        # hard reset
-        # self.world = self.client.load_world(self.town)
-
-        # Delete sensors, vehicles and walkers
-        self._clear_all_actors(['sensor.other.collision',
-                                'sensor.lidar.ray_cast',
-                                'sensor.camera.rgb',
-                                'vehicle.*',
-                                'controller.ai.walker',
-                                'walker.*'])
-
-        # Disable sync mode
+        self._destroy_actors()
+        self.collision_info = {}
+        self.collision_hist = []
+        self.time_step = 0
         self._set_synchronous_mode(False)
 
-        # Spawn surrounding vehicles
-        random.shuffle(self.vehicle_spawn_points)
-        count = self.number_of_vehicles
-        if count > 0:
-            for spawn_point in self.vehicle_spawn_points:
-                if self._try_spawn_random_vehicle_at(spawn_point, number_of_wheels=[4]):
-                    count -= 1
-                if count <= 0:
-                    break
-        while count > 0:
-            if self._try_spawn_random_vehicle_at(random.choice(self.vehicle_spawn_points), number_of_wheels=[4]):
-                count -= 1
+        if self.config['verbose']:
+            print(colored("setting actors", "white"))
+        # set actors
+        ego_vehicle, _ = self.set_ego()
+        self.ego = ego_vehicle
+        rgb_camera, depth_sensor, collision_sensor = self.set_sensors(ego_vehicle,
+                                                                      sensor_width=self.sensor_width,
+                                                                      sensor_height=self.sensor_height)
+        sp_vehicles, sp_walkers, sp_walker_controllers = self.set_actors(vehicles=self.config['vehicles'],
+                                                                         walkers=self.config['walkers'])
+        # we need to store the pointers to avoid "out of scope" errors
+        self.to_clean = dict(vehicles=[ego_vehicle, *sp_vehicles, *sp_walkers],
+                             sensors=[collision_sensor, rgb_camera, depth_sensor],
+                             controllers=sp_walker_controllers)
+        if self.config['verbose']:
+            print(colored(f"spawned {len(sp_vehicles)} vehicles and {len(sp_walkers)} walkers", "green"))
 
-        # Spawn pedestrians
-        random.shuffle(self.walker_spawn_points)
-        count = self.number_of_walkers
-        if count > 0:
-            for spawn_point in self.walker_spawn_points:
-                if self._try_spawn_random_walker_at(spawn_point):
-                    count -= 1
-                if count <= 0:
-                    break
-        while count > 0:
-            if self._try_spawn_random_walker_at(random.choice(self.walker_spawn_points)):
-                count -= 1
+        # attaching handlers
+        weak_self = weakref.ref(self)
+        rgb_camera.listen(lambda data: get_camera_img(weak_self, data))
+        depth_sensor.listen(lambda data: get_depth_img(weak_self, data))
+        collision_sensor.listen(lambda event: get_collision_hist(weak_self, event))
 
-        # Spawn the ego vehicle
-        ego_spawn_times = 0
-        while True:
+        self._set_synchronous_mode(True)
 
-            if ego_spawn_times > self.max_ego_spawn_times:
-                self.reset()
+        self.route_planner = RoutePlanner(ego_vehicle, self.config['max_waypt'])
+        self.waypoints, _, self.vehicle_front, self.road_option = self.route_planner.run_step()
 
-            transform = random.choice(self.vehicle_spawn_points)
-            if self._try_spawn_ego_vehicle_at(transform):
-                break
-            else:
-                ego_spawn_times += 1
-                time.sleep(0.1)
-
-            sys.stdout.write("\r")
-            sys.stdout.write(f"Trying to spawn ego vehicle: {ego_spawn_times}/{self.max_ego_spawn_times}")
-            sys.stdout.flush()
-
-        # Add collision sensor
-        self.collision_sensor = self.world.spawn_actor(self.collision_bp, carla.Transform(), attach_to=self.ego)
-        self.collision_sensor.listen(lambda event: get_collision_hist(event))
-
-        def get_collision_hist(event):
-            self.collision_info = {
-                "frame": event.frame,
-                "other_actor": event.other_actor.type_id,
-            }
-            self.collision_hist.append(event)
-
-        self.collision_info = None
-
-        # Add camera sensor
-        self.camera_sensor = self.world.spawn_actor(self.camera_bp, self.camera_trans, attach_to=self.ego)
-        self.camera_sensor.listen(lambda data: get_camera_img(data))
-
-        def get_camera_img(data):
-            array = np.frombuffer(data.raw_data, dtype=np.dtype("uint8"))
-            array = np.reshape(array, (data.height, data.width, 4))
-            array = array[:, :, :3]
-            self.camera_img = array
-
-        self.depth_sensor = self.world.spawn_actor(self.depth_bp, self.camera_trans, attach_to=self.ego)
-        self.depth_sensor.listen(lambda data: get_depth_img(data))
-
-        def get_depth_img(data):
-            array = np.frombuffer(data.raw_data, dtype=np.dtype("uint8"))
-            array = np.reshape(array, (data.height, data.width, 4))
-            array = array.astype(np.float32)
-            # Apply (R + G * 256 + B * 256 * 256) / (256 * 256 * 256 - 1).
-            normalized_depth = np.dot(array[:, :, :3], [65536.0, 256.0, 1.0])
-            normalized_depth /= 16777215.0  # (256.0 * 256.0 * 256.0 - 1.0)
-            depth_meters = normalized_depth * 1000
-            self.depth_array = depth_meters
-
-        # Update timesteps
-        self.time_step = 0
-        self.reset_step += 1
-
-        # Enable sync mode
-        self.settings.synchronous_mode = True
-        self.tm.set_synchronous_mode(True)
-        self.world.apply_settings(self.settings)
-
-        self.routeplanner = RoutePlanner(self.ego, self.max_waypt)
-        self.waypoints, _, self.vehicle_front, self.road_option = self.routeplanner.run_step()
-
-        return self._get_obs()
+    def render(self, mode='human'):
+        pass
 
     def step(self, action: list):
 
@@ -246,10 +149,11 @@ class CarlaEnv(gym.Env):
         # Apply control
         act = carla.VehicleControl(throttle=float(throttle), steer=float(-steer), brake=float(brake))
         self.ego.apply_control(act)
+        self.update_spectator(self.ego)
         self.world.tick()
 
         # route planner
-        self.waypoints, _, self.vehicle_front, self.road_option = self.routeplanner.run_step()
+        self.waypoints, _, self.vehicle_front, self.road_option = self.route_planner.run_step()
 
         # state information
         info = {
@@ -263,104 +167,6 @@ class CarlaEnv(gym.Env):
         self.total_step += 1
 
         return self._get_obs(), self._get_reward(act), self._terminal(), copy.deepcopy(info)
-
-    def seed(self, seed=None):
-        self.np_random, seed = seeding.np_random(seed)
-        return [seed]
-
-    def render(self, mode='human'):
-        pass
-
-    def _create_vehicle_blueprint(self, actor_filter, color=None, number_of_wheels=None):
-        """Create the blueprint for a specific actor type.
-
-        Args:
-          actor_filter: a string indicating the actor type, e.g, 'vehicle.lincoln*'.
-
-        Returns:
-          bp: the blueprint object of carla.
-        """
-        if number_of_wheels is None:
-            number_of_wheels = [4]
-        blueprints = self.world.get_blueprint_library().filter(actor_filter)
-        blueprint_library = []
-        for nw in number_of_wheels:
-            blueprint_library = blueprint_library + [x for x in blueprints if
-                                                     int(x.get_attribute('number_of_wheels')) == nw]
-        bp = random.choice(blueprint_library)
-        if bp.has_attribute('color'):
-            if not color:
-                color = random.choice(bp.get_attribute('color').recommended_values)
-            bp.set_attribute('color', color)
-        return bp
-
-    def _set_synchronous_mode(self, synchronous=True):
-        """Set whether to use the synchronous mode.
-        """
-        self.settings.synchronous_mode = synchronous
-        self.world.apply_settings(self.settings)
-
-    def _try_spawn_random_vehicle_at(self, transform, number_of_wheels=None):
-        """Try to spawn a surrounding vehicle at specific transform with random blueprint.
-
-        Args:
-          transform: the carla transform object.
-
-        Returns:
-          Bool indicating whether the spawn is successful.
-        """
-        if number_of_wheels is None:
-            number_of_wheels = [4]
-        blueprint = self._create_vehicle_blueprint('vehicle.*', number_of_wheels=number_of_wheels)
-        blueprint.set_attribute('role_name', 'autopilot')
-        vehicle = self.world.try_spawn_actor(blueprint, transform)
-
-        if vehicle:
-            vehicle.set_autopilot(True, self.tm_port)
-            return True
-        return False
-
-    def _try_spawn_random_walker_at(self, transform):
-        """Try to spawn a walker at specific transform with random blueprint.
-
-        Args:
-          transform: the carla transform object.
-
-        Returns:
-          Bool indicating whether the spawn is successful.
-        """
-        walker_bp = random.choice(self.world.get_blueprint_library().filter('walker.*'))
-        # set as not invencible
-        if walker_bp.has_attribute('is_invincible'):
-            walker_bp.set_attribute('is_invincible', 'false')
-        walker_actor = self.world.try_spawn_actor(walker_bp, transform)
-
-        if walker_actor is not None:
-            walker_controller_bp = self.world.get_blueprint_library().find('controller.ai.walker')
-            walker_controller_actor = self.world.spawn_actor(walker_controller_bp, carla.Transform(), walker_actor)
-            # start walker
-            walker_controller_actor.start()
-            # set walk to random point
-            walker_controller_actor.go_to_location(self.world.get_random_location_from_navigation())
-            # random max speed
-            walker_controller_actor.set_max_speed(1 + random.random())  # max speed between 1 and 2 (default is 1.4 m/s)
-            return True
-        return False
-
-    def _try_spawn_ego_vehicle_at(self, transform):
-        """Try to spawn the ego vehicle at specific transform.
-        Args:
-          transform: the carla transform object.
-        Returns:
-          Bool indicating whether the spawn is successful.
-        """
-        vehicle = self.world.try_spawn_actor(self.ego_bp, transform)
-
-        if vehicle is not None:
-            self.ego = vehicle
-            return True
-
-        return False
 
     def _get_obs(self):
         """Get the observations."""
@@ -385,18 +191,20 @@ class CarlaEnv(gym.Env):
         collision = self.collision_info
         speed = np.sqrt(v.x ** 2 + v.y ** 2)
         distance = get_vehicle_position(self.map, self.ego)
-        speed_red = self.speed_reduction_at_intersection
+        speed_red = self.config['speed_reduction_at_intersection']
 
         # speed and steer behavior
         if command in ['RIGHT', 'LEFT']:
-            r_a = 2 - np.abs(speed_red * self.desired_speed - speed) / speed_red * self.desired_speed
+            r_a = 2 - np.abs(speed_red * self.config['desired_speed'] - speed) / speed_red * self.config[
+                'desired_speed']
             is_opposite = steer > 0 and command == 'LEFT' or steer < 0 and command == 'RIGHT'
             r_a -= steer ** 2 if is_opposite else 0
         elif command == 'STRAIGHT':
-            r_a = 1 - np.abs(speed_red * self.desired_speed - speed) / speed_red * self.desired_speed
+            r_a = 1 - np.abs(speed_red * self.config['desired_speed'] - speed) / speed_red * self.config[
+                'desired_speed']
         # follow lane
         else:
-            r_a = 2 - np.abs(self.desired_speed - speed) / self.desired_speed
+            r_a = 2 - np.abs(self.config['desired_speed'] - speed) / self.config['desired_speed']
 
         # collision
         r_c = 0
@@ -419,29 +227,265 @@ class CarlaEnv(gym.Env):
             return True
 
         # If reach maximum timestep
-        if self.time_step > self.max_time_episode:
+        if self.time_step > self.config['max_time_episode']:
             return True
 
         # If at destination
         if self.dests is not None:  # If at destination
             for dest in self.dests:
                 if np.sqrt((ego_x - dest[0]) ** 2 + (ego_y - dest[1]) ** 2) < 4:
-                    print("reached destination")
+                    if self.config['verbose']:
+                        print(colored("reached destination", "red"))
                     return True
 
         # If out of lane
         dis, _ = get_lane_dis(self.waypoints, ego_x, ego_y)
-        if abs(dis) > self.out_lane_thres:
-            print("out of lane")
+        if abs(dis) > self.config['out_lane_thres']:
+            if self.config['verbose']:
+                print(colored("out of lane", "red"))
             return True
 
         return False
 
-    def _clear_all_actors(self, actor_filters):
-        """Clear specific actors."""
-        for actor_filter in actor_filters:
-            for actor in self.world.get_actors().filter(actor_filter):
+    def _destroy_actors(self):
+        # destroy sensors, ego vehicle and social actors
+
+        if 'sensors' in self.to_clean.keys():
+            if self.config['verbose']:
+                print(colored("destroying sensors", "white"))
+            for sensor in self.to_clean['sensors']:
+                if sensor.is_listening:
+                    sensor.stop()
+                if sensor.is_alive:
+                    sensor.destroy()
+
+        if 'controllers' in self.to_clean.keys():
+            if self.config['verbose']:
+                print(colored("destroying controllers", "white"))
+            for controller in self.to_clean['controllers']:
+                controller.stop()
+                if controller.is_alive:
+                    controller.destroy()
+
+        if 'vehicles' in self.to_clean.keys():
+            if self.config['verbose']:
+                print(colored("destroying vehicles and walkers", "white"))
+            for actor in self.to_clean['vehicles']:
                 if actor.is_alive:
-                    if actor.type_id == 'controller.ai.walker':
-                        actor.stop()
                     actor.destroy()
+
+    def _set_synchronous_mode(self, state: bool):
+        self.settings.fixed_delta_seconds = None
+        if state:
+            self.settings.fixed_delta_seconds = self.config['dt']
+        self.settings.synchronous_mode = state
+        self.world.apply_settings(self.settings)
+
+    def _create_vehicle_blueprint(self, actor_filter, color=None, number_of_wheels=None):
+        """Create the blueprint for a specific actor type.
+
+        Args:
+          actor_filter: a string indicating the actor type, e.g, 'vehicle.lincoln*'.
+
+        Returns:
+          bp: the blueprint object of carla.
+        """
+        if number_of_wheels is None:
+            number_of_wheels = [4]
+        blueprints = self.blueprint_library.filter(actor_filter)
+        blueprint_library = []
+        for nw in number_of_wheels:
+            blueprint_library = blueprint_library + [x for x in blueprints if
+                                                     int(x.get_attribute('number_of_wheels')) == nw]
+        bp = random.choice(blueprint_library)
+        if bp.has_attribute('color'):
+            if not color:
+                color = random.choice(bp.get_attribute('color').recommended_values)
+            bp.set_attribute('color', color)
+        return bp
+
+    def _try_spawn_random_vehicle_at(self, transform):
+        """Try to spawn a surrounding vehicle at specific transform with random blueprint.
+
+        Args:
+          transform: the carla transform object.
+
+        Returns:
+          Bool indicating whether the spawn is successful.
+        """
+        blueprint = self._create_vehicle_blueprint('vehicle.*', number_of_wheels=[4])
+        blueprint.set_attribute('role_name', 'autopilot')
+        vehicle = self.world.try_spawn_actor(blueprint, transform)
+        return vehicle
+
+    def _try_spawn_random_walker_at(self, transform):
+        """Try to spawn a walker at specific transform with random blueprint.
+
+        Args:
+          transform: the carla transform object.
+
+        Returns:
+          Bool indicating whether the spawn is successful.
+        """
+        walker_bp = random.choice(self.world.get_blueprint_library().filter('walker.*'))
+        # set as not invencible
+        if walker_bp.has_attribute('is_invincible'):
+            walker_bp.set_attribute('is_invincible', 'false')
+        walker_actor = self.world.try_spawn_actor(walker_bp, transform)
+
+        walker_controller_actor = None
+        if walker_actor is not None:
+            walker_controller_bp = self.world.get_blueprint_library().find('controller.ai.walker')
+            walker_controller_actor = self.world.spawn_actor(walker_controller_bp, carla.Transform(), walker_actor)
+            # start walker
+            walker_controller_actor.start()
+            # set walk to random point
+            walker_controller_actor.go_to_location(self.world.get_random_location_from_navigation())
+            # random max speed
+            walker_controller_actor.set_max_speed(1 + random.random())  # max speed between 1 and 2 (default is 1.4 m/s)
+        return walker_actor, walker_controller_actor
+
+    def set_actors(self, vehicles: int, walkers: int):
+
+        spawned_vehicles, spawned_walkers, spawned_walker_controllers = [], [], []
+        vehicle_spawn_points = list(self.world.get_map().get_spawn_points())
+
+        if self.config['verbose']:
+            print(colored("spawning vehicles", "white"))
+        # Spawn surrounding vehicles
+        count = vehicles
+        max_tries = count * 2
+        while max_tries > 0:
+            random_vehicle = self._try_spawn_random_vehicle_at(random.choice(vehicle_spawn_points))
+            if random_vehicle:
+                spawned_vehicles.append(random_vehicle)
+                count -= 1
+            if count <= 0:
+                break
+            max_tries -= 1
+
+        if self.config['verbose']:
+            print(colored("spawning walkers", "white"))
+        # Spawn pedestrians
+        walker_spawn_points = []
+        for i in range(walkers):
+            spawn_point = carla.Transform()
+            loc = self.world.get_random_location_from_navigation()
+            if loc:
+                spawn_point.location = loc
+                walker_spawn_points.append(spawn_point)
+
+        count = walkers
+        max_tries = count * 2
+        while max_tries > 0:
+            random_walker, random_walker_controller = self._try_spawn_random_walker_at(
+                random.choice(walker_spawn_points))
+            if random_walker and random_walker_controller:
+                spawned_walkers.append(random_walker)
+                spawned_walker_controllers.append(random_walker_controller)
+                count -= 1
+            if count <= 0:
+                break
+            max_tries -= 1
+
+        if self.config['verbose']:
+            print(colored("activating autopilots", "white"))
+        # set autopilot for all the vehicles
+        for v in spawned_vehicles:
+            v.set_autopilot(True, self.tm_port)
+
+        return spawned_vehicles, spawned_walkers, spawned_walker_controllers
+
+    def set_camera(self, vehicle, sensor_width: int, sensor_height: int, fov: int) -> object:
+        bp = self.blueprint_library.find('sensor.camera.rgb')
+        bp.set_attribute('image_size_x', f'{sensor_width}')
+        bp.set_attribute('image_size_y', f'{sensor_height}')
+        bp.set_attribute('fov', f'{fov}')
+
+        # Adjust sensor relative position to the vehicle
+        spawn_point = carla.Transform(carla.Location(x=1.0, z=2.0))
+        rgb_camera = self.world.spawn_actor(bp, spawn_point, attach_to=vehicle)
+        rgb_camera.blur_amount = 0.0
+        rgb_camera.motion_blur_intensity = 0
+        rgb_camera.motion_max_distortion = 0
+
+        # Camera calibration
+        calibration = np.identity(3)
+        calibration[0, 2] = sensor_width / 2.0
+        calibration[1, 2] = sensor_height / 2.0
+        calibration[0, 0] = calibration[1, 1] = sensor_width / (2.0 * np.tan(fov * np.pi / 360.0))
+        return rgb_camera
+
+    def set_depth_sensor(self, vehicle, sensor_width: int, sensor_height: int, fov: int):
+        bp = self.blueprint_library.find('sensor.camera.depth')
+        bp.set_attribute('image_size_x', f'{sensor_width}')
+        bp.set_attribute('image_size_y', f'{sensor_height}')
+        bp.set_attribute('fov', f'{fov}')
+
+        # Adjust sensor relative position to the vehicle
+        spawn_point = carla.Transform(carla.Location(x=1.0, z=2.0))
+        depth_camera = self.world.spawn_actor(bp, spawn_point, attach_to=vehicle)
+        return depth_camera
+
+    def set_collision_sensor(self, vehicle):
+        """
+        In case of collision, this sensor will update the 'collision_info' attribute with a dictionary that contains
+        the following keys: ["frame", "actor_id", "other_actor"].
+        """
+        bp = self.blueprint_library.find('sensor.other.collision')
+        collision_sensor = self.world.spawn_actor(bp, carla.Transform(), attach_to=vehicle)
+        return collision_sensor
+
+    def update_spectator(self, vehicle):
+        """
+        The following code would move the spectator actor, to point the view towards a desired vehicle.
+        """
+        spectator = self.world.get_spectator()
+        transform = vehicle.get_transform()
+        spectator.set_transform(carla.Transform(transform.location + carla.Location(z=50),
+                                                carla.Rotation(pitch=-90)))
+
+    def set_sensors(self, vehicle, sensor_width: int, sensor_height: int, fov: int = 110):
+        rgb_camera = self.set_camera(vehicle, sensor_width, sensor_height, fov)
+        depth_sensor = self.set_depth_sensor(vehicle, sensor_width, sensor_height, fov)
+        collision_sensor = self.set_collision_sensor(vehicle)
+        return rgb_camera, depth_sensor, collision_sensor
+
+    def set_ego(self):
+        """
+        Add ego agent to the simulation. Return an Carla.Vehicle object.
+        :return: The ego agent and ego vehicle if it was added successfully. Otherwise returns None.
+        """
+        # These vehicles are not considered because
+        # the cameras get occluded without changing their absolute position
+        info = {}
+        available_vehicle_bps = [bp for bp in self.blueprint_library.filter("vehicle.*")]
+        ego_vehicle_bp = random.choice([x for x in available_vehicle_bps if x.id not in
+                                        ['vehicle.audi.tt', 'vehicle.carlamotors.carlacola', 'vehicle.tesla.cybertruck',
+                                         'vehicle.volkswagen.t2', 'vehicle.bh.crossbike']])
+
+        spawn_points = self.map.get_spawn_points()
+        random.shuffle(spawn_points)
+
+        ego_vehicle = self.try_spawn_ego(ego_vehicle_bp, spawn_points)
+        if ego_vehicle is None:
+            print(colored("Couldn't spawn ego vehicle", "red"))
+            return None
+        info['vehicle'] = ego_vehicle.type_id
+        info['id'] = ego_vehicle.id
+        self.update_spectator(vehicle=ego_vehicle)
+
+        for v in self.world.get_actors().filter("vehicle.*"):
+            if v.id != ego_vehicle.id:
+                v.set_autopilot(True)
+
+        return ego_vehicle, info
+
+    def try_spawn_ego(self, ego_vehicle_bp, spawn_points):
+        ego_vehicle = None
+        for p in spawn_points:
+            ego_vehicle = self.world.try_spawn_actor(ego_vehicle_bp, p)
+            if ego_vehicle:
+                ego_vehicle.set_autopilot(False)
+                return ego_vehicle
+        return ego_vehicle
