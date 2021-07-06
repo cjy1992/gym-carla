@@ -23,19 +23,6 @@ class CarlaEnv(gym.Env):
     """An OpenAI gym wrapper for CARLA simulator."""
 
     def __init__(self, params):
-        # parameters
-        # self.max_past_step = params['max_past_step']
-        # self.number_of_vehicles = params['number_of_vehicles']
-        # self.number_of_walkers = params['number_of_walkers']
-        # self.dt = params['dt']
-        # self.max_time_episode = params['max_time_episode']
-        # self.max_waypt = params['max_waypt']
-        # self.d_behind = params['d_behind']
-        # self.obs_size = 288
-        # self.out_lane_thres = params['out_lane_thres']
-        # self.desired_speed = params['desired_speed']
-        # self.speed_reduction_at_intersection = params['reduction_at_intersection']
-        # self.max_ego_spawn_times = params['max_ego_spawn_times']
 
         self.config = params
 
@@ -72,8 +59,10 @@ class CarlaEnv(gym.Env):
         self.tm_port = self.tm.get_port()
         print(colored(f"Successfully connected to CARLA at {self.config['host']}:{self.config['port']}", "green"))
 
+        # parameters that come from the config dictionary
         self.sensor_width, self.sensor_height = self.config['obs_size'], self.config['obs_size']
         self.fps = int(1 / self.config['dt'])
+        self.max_steps = config['max_time_episode']
 
         # local state vars
         self.ego = None
@@ -128,6 +117,7 @@ class CarlaEnv(gym.Env):
 
         self.route_planner = RoutePlanner(ego_vehicle, self.config['max_waypt'])
         self.waypoints, _, self.vehicle_front, self.road_option = self.route_planner.run_step()
+        return self.step([0, 0])[0]
 
     def render(self, mode='human'):
         pass
@@ -172,12 +162,12 @@ class CarlaEnv(gym.Env):
         """Get the observations."""
         # State observation
         v = self.ego.get_velocity()
-        state = np.array([v.x, v.y, int(self.road_option.value)])
 
         obs = {
             'camera': self.camera_img,
             'depth': self.depth_array,
-            'state': state
+            'speed': np.array([v.x, v.y, v.z]),
+            'hlc': int(self.road_option.value)
         }
 
         return obs
@@ -227,7 +217,7 @@ class CarlaEnv(gym.Env):
             return True
 
         # If reach maximum timestep
-        if self.time_step > self.config['max_time_episode']:
+        if self.time_step > self.max_steps:
             return True
 
         # If at destination
