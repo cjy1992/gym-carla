@@ -204,7 +204,7 @@ class CarlaEnv(gym.Env):
                 r_c = -10
 
         # distance to center
-        r_dist = - distance / 2
+        r_dist = - np.abs(distance / 2)
         return r_a + r_c + r_dist
 
     def _terminal(self):
