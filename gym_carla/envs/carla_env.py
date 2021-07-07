@@ -62,7 +62,7 @@ class CarlaEnv(gym.Env):
         # parameters that come from the config dictionary
         self.sensor_width, self.sensor_height = self.config['obs_size'], self.config['obs_size']
         self.fps = int(1 / self.config['dt'])
-        self.max_steps = config['max_time_episode']
+        self.max_steps = self.config['max_time_episode']
 
         # local state vars
         self.ego = None
@@ -117,27 +117,19 @@ class CarlaEnv(gym.Env):
 
         self.route_planner = RoutePlanner(ego_vehicle, self.config['max_waypt'])
         self.waypoints, _, self.vehicle_front, self.road_option = self.route_planner.run_step()
-        return self.step([0, 0])[0]
+        return self.step([0, 0, 0])[0]
 
     def render(self, mode='human'):
         pass
 
     def step(self, action: list):
-
-        # Get acceleration and steering
-        acc = action[0]
-        steer = action[1]
-
-        # Convert acceleration to throttle and brake
-        if acc > 0:
-            throttle = np.clip(acc, 0, 1)
-            brake = 0
-        else:
-            throttle = 0
-            brake = np.clip(-acc, 0, 1)
+        """
+        Performs a simulation step.
+        @param action: List with control signals: [throttle, brake, action].
+        """
 
         # Apply control
-        act = carla.VehicleControl(throttle=float(throttle), steer=float(-steer), brake=float(brake))
+        act = carla.VehicleControl(throttle=float(action[0]), brake=float(action[1]), steer=float(action[2]))
         self.ego.apply_control(act)
         self.update_spectator(self.ego)
         self.world.tick()
