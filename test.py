@@ -2,7 +2,6 @@
 import time
 
 import cv2
-import gym
 import sys
 
 
@@ -23,6 +22,7 @@ def main():
         'obs_size': 288,  # sensor width and height
         'max_past_step': 1,  # the number of past steps to draw
         'dt': 0.025,  # time interval between two frames
+        'reward_weights': [0.3, 0.3, 0.3],
         'continuous_accel_range': [-1.0, 1.0],  # continuous acceleration range
         'continuous_steer_range': [-1.0, 1.0],  # continuous steering angle range
         'ego_vehicle_filter': 'vehicle.lincoln*',  # filter for defining ego vehicle
@@ -41,7 +41,7 @@ def main():
     try:
 
         while True:
-            action = [2.0, 0.0]
+            action = [1.0, 0.0, 0.0]
             start = time.time()
             obs, r, done, info = env.step(action)
 
