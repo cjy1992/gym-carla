@@ -63,6 +63,7 @@ class CarlaEnv(gym.Env):
         self.sensor_width, self.sensor_height = self.config['obs_size'], self.config['obs_size']
         self.fps = int(1 / self.config['dt'])
         self.max_steps = self.config['max_time_episode']
+        self.reward_weights = self.config['reward_weights']
 
         # local state vars
         self.ego = None
@@ -148,7 +149,7 @@ class CarlaEnv(gym.Env):
         self.time_step += 1
         self.total_step += 1
 
-        return self._get_obs(), self._get_reward(act), self._terminal(), copy.deepcopy(info)
+        return self._get_obs(), self._get_reward(act, reward_weights=self.reward_weights), self._terminal(), copy.deepcopy(info)
 
     def _get_obs(self):
         """Get the observations."""
@@ -164,7 +165,7 @@ class CarlaEnv(gym.Env):
 
         return obs
 
-    def _get_reward(self, control):
+    def _get_reward(self, control, reward_weights: tuple):
         """Calculate the step reward."""
 
         steer = control.steer
@@ -197,7 +198,7 @@ class CarlaEnv(gym.Env):
 
         # distance to center
         r_dist = - np.abs(distance / 2)
-        return r_a + r_c + r_dist
+        return reward_weights[0] * r_a + reward_weights[1] * r_c + reward_weights[2] * r_dist
 
     def _terminal(self):
         """Calculate whether to terminate the current episode."""
