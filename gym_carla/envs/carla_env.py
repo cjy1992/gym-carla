@@ -64,6 +64,7 @@ class CarlaEnv(gym.Env):
         self.fps = int(1 / self.config['dt'])
         self.max_steps = self.config['max_time_episode']
         self.reward_weights = self.config['reward_weights']
+        self.target_step_distance = self.config['desired_speed'] * self.config['dt']
 
         # local state vars
         self.ego = None
@@ -73,6 +74,7 @@ class CarlaEnv(gym.Env):
         self.road_option = None
         self.camera_img = None
         self.depth_array = None
+        self.last_position = None
         self.time_step = 0
         self.total_step = 0
         self.to_clean = {}
@@ -96,6 +98,7 @@ class CarlaEnv(gym.Env):
         # set actors
         ego_vehicle, _ = self.set_ego()
         self.ego = ego_vehicle
+        self.last_position = get_pos(ego_vehicle)
         rgb_camera, depth_sensor, collision_sensor = self.set_sensors(ego_vehicle,
                                                                       sensor_width=self.sensor_width,
                                                                       sensor_height=self.sensor_height)
@@ -145,11 +148,14 @@ class CarlaEnv(gym.Env):
             'road_option': self.road_option
         }
 
+        step_reward = self._get_reward(act, reward_weights=self.reward_weights)
+
+        self.last_position = get_pos(self.ego)
         # Update timesteps
         self.time_step += 1
         self.total_step += 1
 
-        return self._get_obs(), self._get_reward(act, reward_weights=self.reward_weights), self._terminal(), copy.deepcopy(info)
+        return self._get_obs(), step_reward, self._terminal(), copy.deepcopy(info)
 
     def _get_obs(self):
         """Get the observations."""
@@ -178,27 +184,34 @@ class CarlaEnv(gym.Env):
 
         # speed and steer behavior
         if command in ['RIGHT', 'LEFT']:
-            r_a = 2 - np.abs(speed_red * self.config['desired_speed'] - speed) / speed_red * self.config[
+            r_a = -np.abs(speed_red * self.config['desired_speed'] - speed) / speed_red * self.config[
                 'desired_speed']
             is_opposite = steer > 0 and command == 'LEFT' or steer < 0 and command == 'RIGHT'
             r_a -= steer ** 2 if is_opposite else 0
         elif command == 'STRAIGHT':
-            r_a = 1 - np.abs(speed_red * self.config['desired_speed'] - speed) / speed_red * self.config[
+            r_a = - np.abs(speed_red * self.config['desired_speed'] - speed) / speed_red * self.config[
                 'desired_speed']
         # follow lane
         else:
-            r_a = 2 - np.abs(self.config['desired_speed'] - speed) / self.config['desired_speed']
+            r_a = -np.abs(self.config['desired_speed'] - speed) / self.config['desired_speed']
 
         # collision
         r_c = 0
         if collision:
-            r_c = -5
+            r_c = -50
             if str(collision['other_actor']).startswith('vehicle'):
-                r_c = -10
+                r_c = -100
 
         # distance to center
         r_dist = - np.abs(distance / 2)
-        return reward_weights[0] * r_a + reward_weights[1] * r_c + reward_weights[2] * r_dist
+
+        # distance traveled
+        ego_pos = get_pos(self.ego)
+        step_distance_traveled = (ego_pos[0] - self.last_position[0])**2 + (ego_pos[1] - self.last_position[1])**2
+        step_distance_traveled = np.sqrt(step_distance_traveled)
+        r_dist_traveled = -np.abs(self.target_step_distance - step_distance_traveled) / self.target_step_distance
+
+        return r_a + r_c + r_dist + r_dist_traveled
 
     def _terminal(self):
         """Calculate whether to terminate the current episode."""
