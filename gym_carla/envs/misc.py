@@ -144,6 +144,21 @@ def get_lane_dis(waypoints, x, y):
     return dis, w
 
 
+def get_average_delta_yaw(waypoints, yaw):
+    """
+    Calculates average waypoints angle difference between vehicle orientation and waypoints orientation.
+    """
+    waypoints = waypoints[:5] if len(waypoints) >= 5 else waypoints
+    ego_orientation = np.array(np.array([np.cos(yaw), np.sin(yaw)]))
+    result = 0
+    for wp in waypoints:
+        # from waypoint yaw to x-y norm space
+        wp_norm = np.array([np.cos(wp[2] / 180 * np.pi), np.sin(wp[2] / 180 * np.pi)])
+        delta_yaw = -np.arcsin(np.cross(wp_norm, ego_orientation))
+        result += delta_yaw
+    return result / len(waypoints)
+
+
 def get_preview_lane_dis(waypoints, x, y, idx=2):
     """
     Calculate distance from (x, y) to a certain waypoint
@@ -161,8 +176,34 @@ def get_preview_lane_dis(waypoints, x, y, idx=2):
     dis = - lv * cross
     return dis, w
 
+# OLD METHOD
+# def is_within_distance_ahead(target_location, current_location, orientation, max_distance):
+#     """
+#     Check if a target object is within a certain distance in front of a reference object.
+#
+#     :param target_location: location of the target object
+#     :param current_location: location of the reference object
+#     :param orientation: orientation of the reference object
+#     :param max_distance: maximum allowed distance
+#     :return: True if target object is within max_distance ahead of the reference object
+#     """
+#     target_vector = np.array([target_location.x - current_location.x, target_location.y - current_location.y])
+#     norm_target = np.linalg.norm(target_vector)
+#     if norm_target > max_distance:
+#         return False
+#
+#     forward_vector = np.array(
+#         [math.cos(math.radians(orientation)), math.sin(math.radians(orientation))])
+#
+#     try:
+#         d_angle = math.degrees(math.acos(np.dot(forward_vector, target_vector) / norm_target))
+#     except ValueError:
+#         d_angle = 0
+#
+#     return d_angle < 90.0
 
-def is_within_distance_ahead(target_location, current_location, orientation, max_distance):
+
+def is_within_distance_ahead(target_location, current_location, orientation, max_distance, degree=90):
     """
     Check if a target object is within a certain distance in front of a reference object.
 
@@ -172,20 +213,21 @@ def is_within_distance_ahead(target_location, current_location, orientation, max
     :param max_distance: maximum allowed distance
     :return: True if target object is within max_distance ahead of the reference object
     """
-    target_vector = np.array([target_location.x - current_location.x, target_location.y - current_location.y])
-    norm_target = np.linalg.norm(target_vector)
-    if norm_target > max_distance:
+    u = np.array([
+        target_location.x - current_location.x,
+        target_location.y - current_location.y])
+    distance = np.linalg.norm(u)
+
+    if distance > max_distance:
         return False
 
-    forward_vector = np.array(
-        [math.cos(math.radians(orientation)), math.sin(math.radians(orientation))])
+    v = np.array([
+        math.cos(math.radians(orientation)),
+        math.sin(math.radians(orientation))])
 
-    try:
-        d_angle = math.degrees(math.acos(np.dot(forward_vector, target_vector) / norm_target))
-    except ValueError:
-        d_angle = 0
+    angle = math.degrees(math.acos(np.dot(u, v) / distance))
 
-    return d_angle < 90.0
+    return angle < degree
 
 
 def compute_magnitude_angle(target_location, current_location, orientation):
@@ -203,7 +245,7 @@ def compute_magnitude_angle(target_location, current_location, orientation):
     forward_vector = np.array([math.cos(math.radians(orientation)), math.sin(math.radians(orientation))])
     d_angle = math.degrees(math.acos(np.dot(forward_vector, target_vector) / norm_target))
 
-    return (norm_target, d_angle)
+    return norm_target, d_angle
 
 
 def distance_vehicle(waypoint, vehicle_transform):

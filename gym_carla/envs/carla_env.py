@@ -17,6 +17,9 @@ from .listeners import get_collision_hist, get_camera_img, get_depth_img
 from gym_carla.envs.misc import *
 from gym_carla.envs.route_planner import RoutePlanner
 import weakref
+from collections import namedtuple
+
+speed_proto = namedtuple('speed', 'x y z')
 
 
 class CarlaEnv(gym.Env):
@@ -65,16 +68,21 @@ class CarlaEnv(gym.Env):
         self.max_steps = self.config['max_time_episode']
         self.reward_weights = self.config['reward_weights']
         self.target_step_distance = self.config['desired_speed'] * self.config['dt']
+        self._proximity_threshold = 15
 
         # local state vars
         self.ego = None
         self.route_planner = None
         self.waypoints = None
         self.vehicle_front = None
+        self.red_light = None
         self.road_option = None
         self.camera_img = None
-        self.depth_array = None
         self.last_position = None
+        self.distance_to_traffic_light = None
+        self.is_vehicle_hazard = None
+        self.last_steer = None
+
         self.time_step = 0
         self.total_step = 0
         self.to_clean = {}
@@ -99,14 +107,17 @@ class CarlaEnv(gym.Env):
         ego_vehicle, _ = self.set_ego()
         self.ego = ego_vehicle
         self.last_position = get_pos(ego_vehicle)
-        rgb_camera, depth_sensor, collision_sensor = self.set_sensors(ego_vehicle,
-                                                                      sensor_width=self.sensor_width,
-                                                                      sensor_height=self.sensor_height)
+        self.last_steer = 0
+        rgb_camera = self.set_camera(ego_vehicle,
+                                     sensor_width=self.sensor_width,
+                                     sensor_height=self.sensor_height,
+                                     fov=110)
+        collision_sensor = self.set_collision_sensor(ego_vehicle)
         sp_vehicles, sp_walkers, sp_walker_controllers = self.set_actors(vehicles=self.config['vehicles'],
                                                                          walkers=self.config['walkers'])
         # we need to store the pointers to avoid "out of scope" errors
         self.to_clean = dict(vehicles=[ego_vehicle, *sp_vehicles, *sp_walkers],
-                             sensors=[collision_sensor, rgb_camera, depth_sensor],
+                             sensors=[collision_sensor, rgb_camera],
                              controllers=sp_walker_controllers)
         if self.config['verbose']:
             print(colored(f"spawned {len(sp_vehicles)} vehicles and {len(sp_walkers)} walkers", "green"))
@@ -114,13 +125,13 @@ class CarlaEnv(gym.Env):
         # attaching handlers
         weak_self = weakref.ref(self)
         rgb_camera.listen(lambda data: get_camera_img(weak_self, data))
-        depth_sensor.listen(lambda data: get_depth_img(weak_self, data))
         collision_sensor.listen(lambda event: get_collision_hist(weak_self, event))
 
         self._set_synchronous_mode(True)
 
         self.route_planner = RoutePlanner(ego_vehicle, self.config['max_waypt'])
-        self.waypoints, _, self.vehicle_front, self.road_option = self.route_planner.run_step()
+        self.waypoints, self.red_light, self.distance_to_traffic_light, \
+            self.is_vehicle_hazard, self.vehicle_front, self.road_option = self.route_planner.run_step()
         return self.step([0, 0, 0])[0]
 
     def render(self, mode='human'):
@@ -139,47 +150,88 @@ class CarlaEnv(gym.Env):
         self.world.tick()
 
         # route planner
-        self.waypoints, _, self.vehicle_front, self.road_option = self.route_planner.run_step()
+        self.waypoints, self.red_light, self.distance_to_traffic_light,\
+            self.is_vehicle_hazard, self.vehicle_front, self.road_option = self.route_planner.run_step()
 
         # state information
         info = {
             'waypoints': self.waypoints,
-            'vehicle_front': self.vehicle_front,
             'road_option': self.road_option
         }
 
-        step_reward = self._get_reward(act, reward_weights=self.reward_weights)
-
+        step_reward = self._get_reward(act)
+        obs = self._get_obs()
+        self.last_steer = float(action[2])
         self.last_position = get_pos(self.ego)
         # Update timesteps
         self.time_step += 1
         self.total_step += 1
 
-        return self._get_obs(), step_reward, self._terminal(), copy.deepcopy(info)
+        return obs, step_reward, self._terminal(), copy.deepcopy(info)
 
     def _get_obs(self):
         """Get the observations."""
         # State observation
-        v = self.ego.get_velocity()
+        ego_trans = self.ego.get_transform()
+        ego_v = self.ego.get_velocity()
+        ego_loc = self.ego.get_location()
+        ego_control = self.ego.get_control()
+
+        traffic_light_state = self.red_light
+        distance_to_traffic_light = self.distance_to_traffic_light
+        front_vehicle_distance = 15
+        front_vehicle_velocity = speed_proto(x=10, y=10, z=10)
+        if self.vehicle_front is not None:
+            front_vehicle_location = self.vehicle_front.get_location()
+            front_vehicle_distance = np.array([ego_loc.x - front_vehicle_location.x, ego_loc.y - front_vehicle_location.y,
+                                               ego_loc.z - front_vehicle_location.z])
+            front_vehicle_distance = np.linalg.norm(front_vehicle_distance)
+            front_vehicle_velocity = self.vehicle_front.get_velocity()
+
+        # calculate distance and orientation
+        ego_yaw = ego_trans.rotation.yaw / 180 * np.pi
+        lateral_dis, w = get_lane_dis(self.waypoints, ego_loc.x, ego_loc.y)
+        delta_yaw = -np.arcsin(np.cross(w, np.array(np.array([np.cos(ego_yaw), np.sin(ego_yaw)]))))
+        average_delta_yaw = get_average_delta_yaw(self.waypoints, ego_yaw)
+
+        # affordance vector construction
+        velocity_norm_factor = 15.0
+        affordances = np.array([
+            1 if traffic_light_state else 0,
+            distance_to_traffic_light / 80.0,
+            1 if self.is_vehicle_hazard else 0,
+            front_vehicle_distance / 15.0,
+            front_vehicle_velocity.x / velocity_norm_factor,   # x
+            front_vehicle_velocity.y / velocity_norm_factor,   # y
+            front_vehicle_velocity.z / velocity_norm_factor,   # z
+            lateral_dis / 2.0,
+            delta_yaw,
+            ego_v.x / velocity_norm_factor,
+            ego_v.y / velocity_norm_factor,
+            ego_v.z / velocity_norm_factor,
+            ego_control.steer,
+            self.last_steer,
+            average_delta_yaw
+        ])
 
         obs = {
             'camera': self.camera_img,
-            'depth': self.depth_array,
-            'speed': np.array([v.x, v.y, v.z]),
+            'affordances': affordances,
             'hlc': int(self.road_option.value)
         }
 
         return obs
 
-    def _get_reward(self, control, reward_weights: tuple):
+    def _get_reward(self, control):
         """Calculate the step reward."""
 
         steer = control.steer
         command = self.road_option.name
         v = self.ego.get_velocity()
+        ego_loc = self.ego.get_location()
         collision = self.collision_info
         speed = np.sqrt(v.x ** 2 + v.y ** 2)
-        distance = get_vehicle_position(self.map, self.ego)
+        distance, _ = get_lane_dis(self.waypoints, ego_loc.x, ego_loc.y)
         speed_red = self.config['speed_reduction_at_intersection']
 
         # speed and steer behavior
@@ -207,7 +259,7 @@ class CarlaEnv(gym.Env):
 
         # distance traveled
         ego_pos = get_pos(self.ego)
-        step_distance_traveled = (ego_pos[0] - self.last_position[0])**2 + (ego_pos[1] - self.last_position[1])**2
+        step_distance_traveled = (ego_pos[0] - self.last_position[0]) ** 2 + (ego_pos[1] - self.last_position[1]) ** 2
         step_distance_traveled = np.sqrt(step_distance_traveled)
         r_dist_traveled = -np.abs(self.target_step_distance - step_distance_traveled) / self.target_step_distance
 
@@ -412,17 +464,6 @@ class CarlaEnv(gym.Env):
         calibration[0, 0] = calibration[1, 1] = sensor_width / (2.0 * np.tan(fov * np.pi / 360.0))
         return rgb_camera
 
-    def set_depth_sensor(self, vehicle, sensor_width: int, sensor_height: int, fov: int):
-        bp = self.blueprint_library.find('sensor.camera.depth')
-        bp.set_attribute('image_size_x', f'{sensor_width}')
-        bp.set_attribute('image_size_y', f'{sensor_height}')
-        bp.set_attribute('fov', f'{fov}')
-
-        # Adjust sensor relative position to the vehicle
-        spawn_point = carla.Transform(carla.Location(x=1.0, z=2.0))
-        depth_camera = self.world.spawn_actor(bp, spawn_point, attach_to=vehicle)
-        return depth_camera
-
     def set_collision_sensor(self, vehicle):
         """
         In case of collision, this sensor will update the 'collision_info' attribute with a dictionary that contains
@@ -440,12 +481,6 @@ class CarlaEnv(gym.Env):
         transform = vehicle.get_transform()
         spectator.set_transform(carla.Transform(transform.location + carla.Location(z=50),
                                                 carla.Rotation(pitch=-90)))
-
-    def set_sensors(self, vehicle, sensor_width: int, sensor_height: int, fov: int = 110):
-        rgb_camera = self.set_camera(vehicle, sensor_width, sensor_height, fov)
-        depth_sensor = self.set_depth_sensor(vehicle, sensor_width, sensor_height, fov)
-        collision_sensor = self.set_collision_sensor(vehicle)
-        return rgb_camera, depth_sensor, collision_sensor
 
     def set_ego(self):
         """
