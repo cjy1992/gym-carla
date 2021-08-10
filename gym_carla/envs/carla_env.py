@@ -217,6 +217,7 @@ class CarlaEnv(gym.Env):
         obs = {
             'camera': self.camera_img,
             'affordances': affordances,
+            'speed': np.array([ego_v.x, ego_v.y, ego_v.z]),
             'hlc': int(self.road_option.value)
         }
 
