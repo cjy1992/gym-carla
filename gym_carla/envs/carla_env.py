@@ -47,7 +47,7 @@ class CarlaEnv(gym.Env):
         }
 
         self.observation_space = spaces.Dict(observation_space_dict)
-
+        tm_port = params['traffic_manager_port']
         print(colored("Connecting to CARLA...", "white"))
         self.client = carla.Client(self.config['host'], self.config['port'])
         self.client.set_timeout(20.0)
@@ -57,7 +57,7 @@ class CarlaEnv(gym.Env):
         self.blueprint_library = self.world.get_blueprint_library()
         self.settings = self.world.get_settings()
         self.map = self.world.get_map()
-        self.tm = self.client.get_trafficmanager()
+        self.tm = self.client.get_trafficmanager(port=tm_port)
         self.tm.set_synchronous_mode(True)
         self.tm_port = self.tm.get_port()
         print(colored(f"Successfully connected to CARLA at {self.config['host']}:{self.config['port']}", "green"))
