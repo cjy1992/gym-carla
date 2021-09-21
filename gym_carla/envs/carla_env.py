@@ -137,12 +137,12 @@ class CarlaEnv(gym.Env):
         self.route_planner = RoutePlanner(ego_vehicle, self.config['max_waypt'])
         self.waypoints, self.red_light, self.distance_to_traffic_light, \
             self.is_vehicle_hazard, self.vehicle_front, self.road_option = self.route_planner.run_step()
-        return self.step([0, 0, 0])[0]
+        return self._step([0, 0, 0])[0]
 
     def render(self, mode='human'):
         pass
 
-    def step(self, action: list):
+    def _step(self, action: list):
         """
         Performs a simulation step.
         @param action: List with control signals: [throttle, brake, action].
@@ -168,9 +168,6 @@ class CarlaEnv(gym.Env):
         obs = self._get_obs()
         self.last_steer = float(action[2])
         self.last_position = get_pos(self.ego)
-        # Update timesteps
-        self.time_step += 1
-        self.total_step += 1
 
         return obs, step_reward, self._terminal(), copy.deepcopy(info)
 
@@ -223,10 +220,17 @@ class CarlaEnv(gym.Env):
             'camera': self.camera_img,
             'affordances': affordances,
             'speed': np.array([ego_v.x, ego_v.y, ego_v.z]),
-            'hlc': int(self.road_option.value)
+            'hlc': int(self.road_option.value) - 1
         }
 
         return obs
+
+    def step(self, action):
+        for _ in range(3):
+            self._step(action)
+
+        self.time_step += 1
+        return self._step(action)
 
     def _get_reward(self, control):
         """Calculate the step reward."""
@@ -450,7 +454,7 @@ class CarlaEnv(gym.Env):
 
         return spawned_vehicles, spawned_walkers, spawned_walker_controllers
 
-    def set_camera(self, vehicle, sensor_width: int, sensor_height: int, fov: int) -> object:
+    def set_camera(self, vehicle, sensor_width: int, sensor_height: int, fov: int):
         bp = self.blueprint_library.find('sensor.camera.rgb')
         bp.set_attribute('image_size_x', f'{sensor_width}')
         bp.set_attribute('image_size_y', f'{sensor_height}')
