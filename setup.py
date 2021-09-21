@@ -11,5 +11,5 @@ setup(name='gym_carla',
       author_email='c01010010@hotmail.com',
       license='MIT',
       packages=find_packages(),
-      install_requires=['gym', 'pygame']
+      install_requires=['gym']
 )

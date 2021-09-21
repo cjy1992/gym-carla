@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 import time
-
-import cv2
 import sys
 
 
@@ -14,6 +12,7 @@ def main():
         'host': 'localhost',
         'port': 2000,  # connection port
         'town': 'Town03',  # which town to simulate
+        'traffic_manager_port': 8000,
 
         # simulation parameters
         'verbose': False,
@@ -23,7 +22,8 @@ def main():
         'max_past_step': 1,  # the number of past steps to draw
         'dt': 0.025,  # time interval between two frames
         'reward_weights': [0.3, 0.3, 0.3],
-        'continuous_accel_range': [-1.0, 1.0],  # continuous acceleration range
+        'continuous_throttle_range': [0.0, 1.0],  # continuous throttle range,
+        'continuous_brake_range': [0.0, 1.0],  # continuous throttle range
         'continuous_steer_range': [-1.0, 1.0],  # continuous steering angle range
         'ego_vehicle_filter': 'vehicle.lincoln*',  # filter for defining ego vehicle
         'max_time_episode': 1000,  # maximum timesteps per episode
@@ -36,10 +36,9 @@ def main():
     }
 
     env = CarlaEnv(params)
-    obs = env.reset()
+    env.reset()
 
     try:
-
         while True:
             action = [1.0, 0.0, 0.0]
             start = time.time()
@@ -50,15 +49,10 @@ def main():
             sys.stdout.write(f"[{fps:.1f} fps] rew={r:.2f}")
             sys.stdout.flush()
 
-            cv2.imshow('camera', obs['camera'])
-            cv2.waitKey(1)
-
             if done:
                 obs = env.reset()
-                done = False
     finally:
         env.reset()
-        cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':

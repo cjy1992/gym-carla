@@ -11,6 +11,7 @@
 
 from collections import deque
 from enum import Enum
+import numpy as np
 
 import carla
 
@@ -85,9 +86,9 @@ class RoutePlanner():
 
     def run_step(self):
         waypoints = self._get_waypoints()
-        red_light, vehicle_front = self._get_hazard()
+        red_light, distance_to_traffic_light, is_vehicle_hazard, vehicle_front = self._get_hazard()
         # red_light = False
-        return waypoints, red_light, vehicle_front, self._target_road_option
+        return waypoints, red_light, distance_to_traffic_light, is_vehicle_hazard, vehicle_front, self._target_road_option
 
     def _get_waypoints(self):
         """
@@ -143,12 +144,19 @@ class RoutePlanner():
         lights_list = actor_list.filter("*traffic_light*")
 
         # check possible obstacles
-        vehicle_state = self._is_vehicle_hazard(vehicle_list)
+        vehicle_state, front_vehicle = self._is_vehicle_hazard(vehicle_list)
 
         # check for the state of the traffic lights
         light_state = self._is_light_red_us_style(lights_list)
+        distance_to_traffic_light = 80
+        if self._last_traffic_light:
+            # compute distance
+            target_location = self._last_traffic_light.get_location()
+            current_location = self._vehicle.get_location()
+            target_vector = np.array([target_location.x - current_location.x, target_location.y - current_location.y])
+            distance_to_traffic_light = np.linalg.norm(target_vector)
 
-        return light_state, vehicle_state
+        return light_state, distance_to_traffic_light, vehicle_state, front_vehicle
 
     def _is_vehicle_hazard(self, vehicle_list):
         """
@@ -186,9 +194,9 @@ class RoutePlanner():
             if is_within_distance_ahead(loc, ego_vehicle_location,
                                         self._vehicle.get_transform().rotation.yaw,
                                         self._proximity_threshold):
-                return True
+                return True, target_vehicle
 
-        return False
+        return False, None
 
     def _is_light_red_us_style(self, lights_list):
         """

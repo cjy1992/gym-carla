@@ -16,13 +16,14 @@ from .listeners import get_collision_hist, get_camera_img, get_depth_img
 
 from gym_carla.envs.misc import *
 from gym_carla.envs.route_planner import RoutePlanner
+from gym_carla.envs.controller import PIDController
 import weakref
 from collections import namedtuple
 
 speed_proto = namedtuple('speed', 'x y z')
 
 
-class CarlaEnv(gym.Env):
+class CarlaPidEnv(gym.Env):
     """An OpenAI gym wrapper for CARLA simulator."""
 
     def __init__(self, params):
@@ -33,14 +34,11 @@ class CarlaEnv(gym.Env):
         self.dests = None
 
         # action and observation spaces
-        assert "continuous_throttle_range" in params.keys(), "You need to specify the continuous_throttle_range"
-        assert "continuous_brake_range" in params.keys(), "You need to specify the continuous_brake_range"
+        assert "continuous_speed_range" in params.keys(), "You need to specify the continuous_speed_range"
         assert "continuous_steer_range" in params.keys(), "You need to specify the continuous_steer_range"
-        self.action_space = spaces.Box(np.array([params['continuous_throttle_range'][0],
-                                                 params['continuous_brake_range'][0],
+        self.action_space = spaces.Box(np.array([params['continuous_speed_range'][0],
                                                  params['continuous_steer_range'][0]]),
-                                       np.array([params['continuous_throttle_range'][1],
-                                                 params['continuous_brake_range'][1],
+                                       np.array([params['continuous_speed_range'][1],
                                                  params['continuous_steer_range'][1]]),
                                        dtype=np.float32)  # acc, steer
         observation_space_dict = {
@@ -65,6 +63,7 @@ class CarlaEnv(gym.Env):
         self.tm = self.client.get_trafficmanager(port=tm_port)
         self.tm.set_synchronous_mode(True)
         self.tm_port = self.tm.get_port()
+        self.speed_control = PIDController(K_P=1.0)
         print(colored(f"Successfully connected to CARLA at {self.config['host']}:{self.config['port']}", "green"))
 
         # parameters that come from the config dictionary
@@ -145,11 +144,16 @@ class CarlaEnv(gym.Env):
     def step(self, action: list):
         """
         Performs a simulation step.
-        @param action: List with control signals: [throttle, brake, action].
+        @param action: List with control signals: [target_speed, steer].
         """
 
         # Apply control
-        act = carla.VehicleControl(throttle=float(action[0]), brake=float(action[1]), steer=float(action[2]))
+        speed = self.ego.get_velocity()
+        speed = np.linalg.norm([speed.x, speed.y])
+        delta_speed = action[0] - speed
+        throttle = self.speed_control.step(delta_speed)
+
+        act = carla.VehicleControl(throttle=throttle, brake=0, steer=float(action[1]))
         self.ego.apply_control(act)
         self.update_spectator(self.ego)
         self.world.tick()
@@ -166,7 +170,7 @@ class CarlaEnv(gym.Env):
 
         step_reward = self._get_reward(act)
         obs = self._get_obs()
-        self.last_steer = float(action[2])
+        self.last_steer = float(action[1])
         self.last_position = get_pos(self.ego)
         # Update timesteps
         self.time_step += 1
