@@ -13,6 +13,7 @@ import gym
 from gym import spaces
 from gym.utils import seeding
 from .listeners import get_collision_hist, get_camera_img, get_depth_img
+from .utils import unnormalize_action
 
 from gym_carla.envs.misc import *
 from gym_carla.envs.route_planner import RoutePlanner
@@ -147,6 +148,8 @@ class CarlaEnv(gym.Env):
         Performs a simulation step.
         @param action: List with control signals: [throttle, brake, action].
         """
+        # Action unnormalization
+        action = unnormalize_action(action)
 
         # Apply control
         act = carla.VehicleControl(throttle=float(action[0]), brake=float(action[1]), steer=float(action[2]))

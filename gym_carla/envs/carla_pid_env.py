@@ -13,6 +13,7 @@ import gym
 from gym import spaces
 from gym.utils import seeding
 from .listeners import get_collision_hist, get_camera_img, get_depth_img
+from .utils import unnormalize_pid_action
 
 from gym_carla.envs.misc import *
 from gym_carla.envs.route_planner import RoutePlanner
@@ -146,6 +147,8 @@ class CarlaPidEnv(gym.Env):
         Performs a simulation step.
         @param action: List with control signals: [target_speed, steer].
         """
+        # Action UnNormalization
+        action = unnormalize_pid_action(action)
 
         # Apply control
         speed = self.ego.get_velocity()
