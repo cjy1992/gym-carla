@@ -128,7 +128,8 @@ def get_lane_dis(waypoints, x, y):
   :param waypoints: a list of list storing waypoints like [[x0, y0], [x1, y1], ...]
   :param x: x position of vehicle
   :param y: y position of vehicle
-  :return: a tuple of the distance and the closest waypoint orientation
+  :return: a tuple of the distance and the closest waypoint orientation 
+  :added - and waypoint
   """
   dis_min = 1000
   waypt = waypoints[0]
@@ -142,7 +143,7 @@ def get_lane_dis(waypoints, x, y):
   w = np.array([np.cos(waypt[2]/180*np.pi), np.sin(waypt[2]/180*np.pi)])
   cross = np.cross(w, vec/lv)
   dis = - lv * cross
-  return dis, w
+  return dis, w 
 
 
 def get_preview_lane_dis(waypoints, x, y, idx=2):
