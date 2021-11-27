@@ -7,7 +7,7 @@
 
 from __future__ import division
 
-import copy
+from copy import deepcopy
 import numpy as np
 import pygame
 import random
@@ -45,6 +45,8 @@ class CarlaEnv(gym.Env):
     self.desired_speed = params['desired_speed']
     self.max_ego_spawn_times = params['max_ego_spawn_times']
     self.display_route = params['display_route']
+    self.town = params['town']
+    self.use_fixed = params['use_fixed']
     if 'pixor' in params.keys():
       self.pixor = params['pixor']
       self.pixor_size = params['pixor_size']
@@ -83,6 +85,15 @@ class CarlaEnv(gym.Env):
         'pixor_state': spaces.Box(np.array([-1000, -1000, -1, -1, -5]), np.array([1000, 1000, 1, 1, 20]), dtype=np.float32)
         })
     self.observation_space = spaces.Dict(observation_space_dict)
+
+    #adding fixed routes
+
+    self.routes_dict = {'Town04':{'E':[0,301,334,120,75,51],
+                                'M':[191,131,197,210,371,348,141,320],
+                                'H':[251,161,22,194,167,182]
+                                }
+                    }
+
 
     # Connect to carla server and get world object
     print('connecting to Carla server...')
@@ -144,10 +155,10 @@ class CarlaEnv(gym.Env):
 
     self.actor_list = []
     self.route_idx = 0
-    self.routes = [0,301,22,194,191,371,251,167,131,339,
-                    348,197,182,161,120,75,51,14,320,210]
 
-    # Initialize the renderer
+    self.ego_spawn_points = list(self.world.get_map().get_spawn_points())
+    
+    #Initialize the renderer
     self._init_renderer()
 
     # Get pixel grid points
@@ -202,8 +213,8 @@ class CarlaEnv(gym.Env):
     walker_poly_dict = self._get_actor_polygons('walker.*')
     self.walker_polygons.append(walker_poly_dict)
 
-    #check position of idx in routes list and if bigger than 19 reset to 0
-    if self.route_idx > 19:
+    #check position of idx in routes list and if bigger than length of fixed list reset to 0
+    if self.route_idx > len(self.routes_dict[self.town][self.use_fixed])-1:
         self.route_idx = 0
 
     # Spawn the ego vehicle
@@ -211,16 +222,21 @@ class CarlaEnv(gym.Env):
     while True:
       if ego_spawn_times > self.max_ego_spawn_times:
         self.reset()
-
-      if self.task_mode == 'random':
-          # use id of routes in routes list as spawn point
-          route_start = self.routes[self.route_idx]
-          transform = self.vehicle_spawn_points[route_start]
+      
+      if self.use_fixed != None:
+          routes = self.routes_dict[self.town][self.use_fixed]
+          route_start = routes[self.route_idx]
+          transform = self.ego_spawn_points[route_start]
           self.route_idx += 1
-      if self.task_mode == 'roundabout':
+
+      elif self.task_mode == 'random':
+          transform = self.vehicle_spawn_points[0]
+    
+      elif self.task_mode == 'roundabout':
         self.start=[52.1+np.random.uniform(-5,5),-4.2, 178.66] # random
         # self.start=[52.1,-4.2, 178.66] # static
         transform = set_carla_transform(self.start)
+
       if self._try_spawn_ego_vehicle_at(transform):
         break
       else:
@@ -338,7 +354,7 @@ class CarlaEnv(gym.Env):
     self.time_step += 1
     self.total_step += 1
 
-    return (self._get_obs(), self._get_reward(), self._terminal(), copy.deepcopy(info))
+    return (self._get_obs(), self._get_reward(), self._terminal(), deepcopy(info))
 
   def seed(self, seed=None):
     self.np_random, seed = seeding.np_random(seed)
