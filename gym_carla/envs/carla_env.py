@@ -47,6 +47,7 @@ class CarlaEnv(gym.Env):
     self.display_route = params['display_route']
     self.town = params['town']
     self.use_fixed = params['use_fixed']
+    self.weather = params['weather']
     if 'pixor' in params.keys():
       self.pixor = params['pixor']
       self.pixor_size = params['pixor_size']
@@ -103,7 +104,9 @@ class CarlaEnv(gym.Env):
     print('Carla server connected!')
 
     # Set weather
-    self.world.set_weather(carla.WeatherParameters.ClearNoon)
+    weather_str = "carla.WeatherParameters."+params['weather']
+    self.world.set_weather(eval(weather_str))
+    print(self.world.get_weather())
 
     # Get spawn points
     self.vehicle_spawn_points = list(self.world.get_map().get_spawn_points())
