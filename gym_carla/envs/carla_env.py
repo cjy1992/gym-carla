@@ -8,6 +8,7 @@
 from __future__ import division
 
 from copy import deepcopy
+from copy import copy as cp
 import numpy as np
 import pygame
 import random
@@ -91,7 +92,7 @@ class CarlaEnv(gym.Env):
 
     self.routes_dict = {'Town04':{'E':[0,301,334,120,75,51],
                                 'M':[191,131,197,210,371,348,141,320],
-                                'H':[251,161,22,194,167,182]
+                                'H':[251,161,264,234,167,182]
                                 }
                     }
 
@@ -104,7 +105,7 @@ class CarlaEnv(gym.Env):
     print('Carla server connected!')
 
     # Set weather
-    weather_str = "carla.WeatherParameters."+params['weather']
+    weather_str = "carla.WeatherParameters."+self.weather
     self.world.set_weather(eval(weather_str))
     print(self.world.get_weather())
 
@@ -146,6 +147,19 @@ class CarlaEnv(gym.Env):
     # Set the time in seconds between sensor captures
     self.camera_bp.set_attribute('sensor_tick', '0.02')
 
+    # Semantic Camera Sensor (same as RGB)
+    self.sem_img = np.zeros((self.obs_size, self.obs_size, 3), dtype=np.uint8)
+    self.sem_dis_img = np.zeros((self.obs_size, self.obs_size, 3), dtype=np.uint8)
+    self.semantic_trans = carla.Transform(carla.Location(x=0.8, z=1.7))
+    self.seg_camera_bp = self.world.get_blueprint_library().find('sensor.camera.semantic_segmentation')
+    # Modify the attributes of the blueprint to set image resolution and field of view.
+    self.seg_camera_bp.set_attribute('image_size_x', str(self.obs_size))
+    self.seg_camera_bp.set_attribute('image_size_y', str(self.obs_size))
+    self.seg_camera_bp.set_attribute('fov', '110')
+    # Set the time in seconds between sensor captures
+    self.seg_camera_bp.set_attribute('sensor_tick', '0.02')
+
+
     # Set fixed simulation step for synchronous mode
     self.settings = self.world.get_settings()
     self.settings.fixed_delta_seconds = self.dt
@@ -175,9 +189,10 @@ class CarlaEnv(gym.Env):
     self.collision_sensor = None
     self.lidar_sensor = None
     self.camera_sensor = None
+    self.semantic_sensor = None
 
     # Delete sensors, vehicles and walkers
-    self._clear_all_actors(['sensor.other.collision', 'sensor.lidar.ray_cast', 'sensor.camera.rgb', 'vehicle.*', 'controller.ai.walker', 'walker.*'])
+    self._clear_all_actors(['sensor.camera.semantic_segmentation','sensor.other.collision', 'sensor.lidar.ray_cast', 'sensor.camera.rgb', 'vehicle.*', 'controller.ai.walker', 'walker.*'])
 
     # Disable sync mode
     self._set_synchronous_mode(False)
@@ -217,7 +232,7 @@ class CarlaEnv(gym.Env):
     self.walker_polygons.append(walker_poly_dict)
 
     #check position of idx in routes list and if bigger than length of fixed list reset to 0
-    if self.route_idx > len(self.routes_dict[self.town][self.use_fixed])-1:
+    if self.use_fixed != False and self.route_idx > len(self.routes_dict[self.town][self.use_fixed])-1:
         self.route_idx = 0
 
     # Spawn the ego vehicle
@@ -226,14 +241,15 @@ class CarlaEnv(gym.Env):
       if ego_spawn_times > self.max_ego_spawn_times:
         self.reset()
       
-      if self.use_fixed != None:
+      if self.use_fixed != False:
           routes = self.routes_dict[self.town][self.use_fixed]
           route_start = routes[self.route_idx]
           transform = self.ego_spawn_points[route_start]
           self.route_idx += 1
 
       elif self.task_mode == 'random':
-          transform = self.vehicle_spawn_points[0]
+          idx = random.randint(0,len(self.vehicle_spawn_points)-1)
+          transform = self.vehicle_spawn_points[idx]
     
       elif self.task_mode == 'roundabout':
         self.start=[52.1+np.random.uniform(-5,5),-4.2, 178.66] # random
@@ -277,6 +293,29 @@ class CarlaEnv(gym.Env):
       array = array[:, :, ::-1]
       self.camera_img = array
 
+
+    #add semantic camera sensor
+    self.semantic_sensor = self.world.spawn_actor(self.seg_camera_bp, self.semantic_trans, attach_to=self.ego)
+    self.actor_list.append(self.semantic_sensor)
+    self.semantic_sensor.listen(lambda data: get_sem_img(data))
+    def get_sem_img(data):
+      #create image copy 
+      #Image with just tags
+      array = np.frombuffer(data.raw_data, dtype = np.dtype("uint8"))
+      array = np.reshape(array, (data.height, data.width, 4))
+      array = array[:, :, :3]
+      array = array[:, :, ::-1]
+      self.sem_img = array
+      #full semantic image
+      #image.convert(carla.ColorConverter.CityScapesPalette)
+      #img_array = np.frombuffer(image.raw_data, dtype = np.dtype("uint8"))
+      #img_array = np.reshape(img_array, (image.height, image.width, 4))
+      #img_array = img_array[:, :, :3]
+      #img_array = img_array[:, :, ::-1]
+      #self.sem_dis_img = img_array
+
+
+
     # Update timesteps
     self.time_step=0
     self.reset_step+=1
@@ -313,7 +352,7 @@ class CarlaEnv(gym.Env):
     # Convert acceleration to throttle and brake
 
     if speed < self.desired_speed:
-      throttle = self.ego.get_control().throttle + 0.05
+      throttle = self.ego.get_control().throttle + 0.5*(1-(speed/self.desired_speed))
       brake = 0
     else:
       throttle = 0
@@ -580,13 +619,19 @@ class CarlaEnv(gym.Env):
     lidar = lidar * 255
 
     # Display lidar image
-    lidar_surface = rgb_to_display_surface(lidar, self.display_size)
-    self.display.blit(lidar_surface, (self.display_size, 0))
+    #lidar_surface = rgb_to_display_surface(lidar, self.display_size)
+    #self.display.blit(lidar_surface, (self.display_size, 0))
+    
+    #add semantic display instead of Lidar
+    semantic = resize(self.sem_img, (self.obs_size, self.obs_size))*255
+    semantic_surface = rgb_to_display_surface(semantic, self.display_size)
+    self.display.blit(semantic_surface, (self.display_size, 0))
 
     ## Display camera image
     camera = resize(self.camera_img, (self.obs_size, self.obs_size)) * 255
     camera_surface = rgb_to_display_surface(camera, self.display_size)
     self.display.blit(camera_surface, (self.display_size * 2, 0))
+
 
     # Display on pygame
     pygame.display.flip()
@@ -641,6 +686,8 @@ class CarlaEnv(gym.Env):
 
     obs = {
       'camera':camera.astype(np.uint8),
+      'semantic':semantic.astype(np.uint8),
+      'semantic_img':self.sem_img,
       'lidar':lidar.astype(np.uint8),
       'birdeye':birdeye.astype(np.uint8),
       'state': state,
