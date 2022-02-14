@@ -41,7 +41,7 @@ class CarlaEnv(gym.Env):
     self.obs_range = params['obs_range']
     self.lidar_bin = params['lidar_bin']
     self.d_behind = params['d_behind']
-    self.obs_size = int(self.obs_range/self.lidar_bin)
+    self.obs_size = params['obs_size']
     self.out_lane_thres = params['out_lane_thres']
     self.desired_speed = params['desired_speed']
     self.max_ego_spawn_times = params['max_ego_spawn_times']
@@ -613,10 +613,10 @@ class CarlaEnv(gym.Env):
     wayptimg = np.fliplr(np.rot90(wayptimg, 3))
 
     # Get the final lidar image
-    lidar = np.concatenate((lidar, wayptimg), axis=2)
-    lidar = np.flip(lidar, axis=1)
-    lidar = np.rot90(lidar, 1)
-    lidar = lidar * 255
+    #lidar = np.concatenate((lidar, wayptimg), axis=2)
+    #lidar = np.flip(lidar, axis=1)
+    #lidar = np.rot90(lidar, 1)
+    #lidar = lidar * 255
 
     # Display lidar image
     #lidar_surface = rgb_to_display_surface(lidar, self.display_size)
